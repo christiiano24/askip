@@ -4,55 +4,53 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.messaging.FirebaseMessaging
-import com.rnandresy.lol.model.Badge
-import com.rnandresy.lol.model.Comment
-import com.rnandresy.lol.model.Conversation
-import com.rnandresy.lol.model.Message
-import com.rnandresy.lol.model.Post
-import com.rnandresy.lol.model.UserProfile
+import com.rnandresy.lol.model.*
 import com.rnandresy.lol.repository.FirebaseRepository
-import com.rnandresy.lol.utils.ADMIN_BADGE_NAME
-import com.rnandresy.lol.utils.DataUsageTracker
-import com.rnandresy.lol.utils.NotificationHelper
-import com.rnandresy.lol.utils.SettingsRepository
-import com.rnandresy.lol.utils.isAdmin
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import com.rnandresy.lol.utils.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
 class AskipViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repo = FirebaseRepository()
-    private val notif = NotificationHelper(application)
-    val dataTracker = DataUsageTracker()
+    private val repo     = FirebaseRepository()
+    private val notif    = NotificationHelper(application)
     private val settings = SettingsRepository(application)
+    val dataTracker      = DataUsageTracker()
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
-    val isLoggedIn = MutableStateFlow(FirebaseAuth.getInstance().currentUser != null)
-    val currentUserId get() = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-    val currentEmail get() = FirebaseAuth.getInstance().currentUser?.email ?: ""
+    val isLoggedIn    = MutableStateFlow(repo.isLoggedIn())
+    val currentUserId get() = repo.currentUserId()
+    val currentEmail  get() = repo.currentEmail()
 
     // ── Profiles ──────────────────────────────────────────────────────────────
 
-    private val _myProfile = MutableStateFlow<UserProfile?>(null)
+    private val _myProfile     = MutableStateFlow<UserProfile?>(null)
     val myProfile: StateFlow<UserProfile?> = _myProfile
 
     private val _viewedProfile = MutableStateFlow<UserProfile?>(null)
     val viewedProfile: StateFlow<UserProfile?> = _viewedProfile
 
-    private val _allProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    private val _allProfiles   = MutableStateFlow<List<UserProfile>>(emptyList())
     val allProfiles: StateFlow<List<UserProfile>> = _allProfiles
 
-    // ── Posts ─────────────────────────────────────────────────────────────────
+    // ── Posts & Stories ───────────────────────────────────────────────────────
 
-    private val _posts = MutableStateFlow<List<Post>>(emptyList())
-    val posts: StateFlow<List<Post>> = _posts
+    private val _allPosts = MutableStateFlow<List<Post>>(emptyList())
+
+    val feedPosts: StateFlow<List<Post>> = _allPosts
+        .map { posts ->
+            posts.filter { it.postType != "confession" }
+                .sortedWith(compareByDescending<Post> { it.isPinned }.thenByDescending { it.timestamp })
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val confessions: StateFlow<List<Post>> = _allPosts
+        .map { it.filter { p -> p.postType == "confession" }.sortedByDescending { it.timestamp } }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private val _stories      = MutableStateFlow<List<Story>>(emptyList())
+    val stories: StateFlow<List<Story>> = _stories
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
@@ -62,7 +60,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val _comments = MutableStateFlow<List<Comment>>(emptyList())
     val comments: StateFlow<List<Comment>> = _comments
 
-    // ── Conversations & Messages ───────────────────────────────────────────────
+    // ── Conversations ─────────────────────────────────────────────────────────
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations
@@ -75,124 +73,133 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val _allBadges = MutableStateFlow<List<Badge>>(emptyList())
     val allBadges: StateFlow<List<Badge>> = _allBadges
 
+    private val _myBadges = MutableStateFlow<List<Badge>>(emptyList())
+    val myBadges: StateFlow<List<Badge>> = _myBadges
+
+    // ── Achievements ──────────────────────────────────────────────────────────
+
+    private val _myAchievements     = MutableStateFlow<List<Achievement>>(emptyList())
+    val myAchievements: StateFlow<List<Achievement>> = _myAchievements
+
+    private val _viewedAchievements = MutableStateFlow<List<Achievement>>(emptyList())
+    val viewedAchievements: StateFlow<List<Achievement>> = _viewedAchievements
+
     // ── Settings ──────────────────────────────────────────────────────────────
 
-    val notifyMessages: StateFlow<Boolean> = settings.notifyMessages
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val notifyPosts: StateFlow<Boolean> = settings.notifyPosts
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val totalBytesStored: StateFlow<Long> = settings.totalBytes
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val notifyMessages   = settings.notifyMessages.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val notifyPosts      = settings.notifyPosts.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val totalBytesStored = settings.totalBytes.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
-    // ── UI state ──────────────────────────────────────────────────────────────
+    // ── UI ────────────────────────────────────────────────────────────────────
 
-    val error = MutableStateFlow<String?>(null)
+    val error   = MutableStateFlow<String?>(null)
     val loading = MutableStateFlow(false)
 
-    private var feedJob: Job? = null
-    private var convJob: Job? = null
-    private var msgJob: Job? = null
+    private var postsJob:   Job? = null
+    private var storiesJob: Job? = null
+    private var convJob:    Job? = null
+    private var msgJob:     Job? = null
+    private var commentJob: Job? = null
+    private var badgesJob:  Job? = null
     private var profileJob: Job? = null
-    private var badgesJob: Job? = null
     private var profilesJob: Job? = null
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
     init {
-        FirebaseAuth.getInstance().addAuthStateListener { auth ->
-            isLoggedIn.value = auth.currentUser != null
-            if (auth.currentUser != null) startListeners()
-            else stopListeners()
+        FirebaseAuth.getInstance().addAuthStateListener { fa ->
+            isLoggedIn.value = fa.currentUser != null
+            if (fa.currentUser != null) startAll() else stopAll()
         }
-        if (isLoggedIn.value) startListeners()
+        if (repo.isLoggedIn()) startAll()
     }
 
-    private fun startListeners() {
+    private fun startAll() {
         listenMyProfile()
+        listenAllProfiles()
         listenPosts()
+        listenStories()
         listenConversations()
         listenAllBadges()
-        listenAllProfiles()
-        fetchFcmToken()
     }
 
-    private fun stopListeners() {
-        feedJob?.cancel(); convJob?.cancel(); msgJob?.cancel()
-        profileJob?.cancel(); badgesJob?.cancel(); profilesJob?.cancel()
-        _posts.value = emptyList()
+    private fun stopAll() {
+        listOf(postsJob, storiesJob, convJob, msgJob, commentJob, badgesJob, profileJob, profilesJob)
+            .forEach { it?.cancel() }
+        _allPosts.value = emptyList()
+        _stories.value  = emptyList()
         _conversations.value = emptyList()
         _messages.value = emptyList()
         _myProfile.value = null
         _allProfiles.value = emptyList()
         _allBadges.value = emptyList()
+        _myBadges.value  = emptyList()
     }
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     fun login(email: String, password: String) = viewModelScope.launch {
         loading.value = true
-        try { repo.login(email.trim(), password.trim()) }
-        catch (e: Exception) { error.value = translateError(e.message) }
-        finally { loading.value = false }
+        runCatching { repo.login(email.trim(), password.trim()) }
+            .onFailure { error.value = friendly(it.message) }
+        loading.value = false
     }
 
     fun register(email: String, password: String, username: String) = viewModelScope.launch {
         loading.value = true
-        try {
+        runCatching {
             val uid = repo.register(email.trim(), password.trim())
             repo.createDefaultProfile(uid, username.trim())
-        } catch (e: Exception) { error.value = translateError(e.message) }
-        finally { loading.value = false }
+        }.onFailure { error.value = friendly(it.message) }
+        loading.value = false
     }
 
-    fun logout() {
-        viewModelScope.launch {
-            val bytes = dataTracker.getSessionBytes()
-            if (bytes > 0) settings.addBytes(bytes)
-        }
-        repo.logout()
+    fun logout() = viewModelScope.launch {
+        val bytes = dataTracker.getSessionBytes()
+        if (bytes > 0) settings.addBytes(bytes)
+        runCatching { repo.logout() }
     }
 
-    fun updateEmail(newEmail: String, password: String, onDone: (Boolean, String?) -> Unit) =
+    fun updateEmail(newEmail: String, pwd: String, onDone: (Boolean, String?) -> Unit) =
         viewModelScope.launch {
-            try { repo.updateEmail(newEmail, password); onDone(true, null) }
-            catch (e: Exception) { onDone(false, e.message) }
+            runCatching { repo.updateEmail(newEmail, pwd) }
+                .onSuccess { onDone(true, null) }
+                .onFailure { onDone(false, it.message) }
         }
 
-    fun updatePassword(current: String, newPass: String, onDone: (Boolean, String?) -> Unit) =
+    fun updatePassword(current: String, newPwd: String, onDone: (Boolean, String?) -> Unit) =
         viewModelScope.launch {
-            try { repo.updatePassword(current, newPass); onDone(true, null) }
-            catch (e: Exception) { onDone(false, e.message) }
+            runCatching { repo.updatePassword(current, newPwd) }
+                .onSuccess { onDone(true, null) }
+                .onFailure { onDone(false, it.message) }
         }
 
-    private fun fetchFcmToken() = viewModelScope.launch {
-        try {
-            val token = FirebaseMessaging.getInstance().token.await()
-            repo.updateFcmToken(currentUserId, token)
-        } catch (_: Exception) {}
-    }
-
-    private fun translateError(msg: String?): String = when {
+    private fun friendly(msg: String?) = when {
         msg == null -> "Erreur inconnue"
-        "password" in msg.lowercase() -> "Mot de passe incorrect"
-        "email" in msg.lowercase() && "already" in msg.lowercase() -> "Email déjà utilisé"
-        "no user" in msg.lowercase() -> "Aucun compte avec cet email"
-        "network" in msg.lowercase() -> "Vérifiez votre connexion"
+        "password" in msg.lowercase()          -> "Mot de passe incorrect"
+        "already" in msg.lowercase()           -> "Email déjà utilisé"
+        "no user" in msg.lowercase()           -> "Aucun compte trouvé"
+        "network" in msg.lowercase()           -> "Vérifiez votre connexion"
+        "invalid" in msg.lowercase()           -> "Email ou mot de passe invalide"
+        "weak" in msg.lowercase()              -> "Mot de passe trop faible (6 min)"
         else -> msg
     }
 
-    // ── Profiles ──────────────────────────────────────────────────────────────
+    // ── Profile ───────────────────────────────────────────────────────────────
 
     private fun listenMyProfile() {
         profileJob?.cancel()
         profileJob = viewModelScope.launch {
-            repo.listenToProfile(currentUserId).collect { _myProfile.value = it }
+            repo.listenToProfile(currentUserId).collect { profile ->
+                _myProfile.value = profile
+                profile?.let {
+                    _myBadges.value = _allBadges.value.filter { b -> b.id in it.badgeIds }
+                }
+            }
         }
-    }
-
-    fun loadProfile(userId: String) = viewModelScope.launch {
-        // Écoute temps réel du profil visité
-        repo.listenToProfile(userId).collect { _viewedProfile.value = it }
+        viewModelScope.launch {
+            _myAchievements.value = repo.getAchievements(currentUserId)
+        }
     }
 
     private fun listenAllProfiles() {
@@ -204,31 +211,168 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadAllProfiles() = listenAllProfiles()
+    fun loadProfile(uid: String) = viewModelScope.launch {
+        _viewedProfile.value  = repo.getProfile(uid)
+        _viewedAchievements.value = repo.getAchievements(uid)
+    }
 
-    fun updateProfile(data: Map<String, Any>, onDone: (() -> Unit)? = null) =
+    fun updateProfile(data: Map<String, Any?>, onDone: (() -> Unit)? = null) =
         viewModelScope.launch {
-            try { repo.updateProfile(currentUserId, data); onDone?.invoke() }
-            catch (e: Exception) { error.value = e.message }
+            runCatching {
+                repo.updateProfile(currentUserId, data)
+                onDone?.invoke()
+            }.onFailure { error.value = it.message }
         }
+
+    // ── Achievement engine ────────────────────────────────────────────────────
+
+    private fun checkAchievements(profile: UserProfile) = viewModelScope.launch {
+        val uid      = currentUserId
+        val unlocked = _myAchievements.value.map { it.id }.toSet()
+        suspend fun unlock(id: String) {
+            if (id !in unlocked) {
+                repo.unlockAchievement(uid, id)
+                _myAchievements.value = repo.getAchievements(uid)
+            }
+        }
+        if (profile.postsCount >= 1)                   unlock("first_post")
+        if (profile.postsCount >= 10)                  unlock("ten_posts")
+        if (profile.postsCount >= 25)                  unlock("twenty_five_p")
+        if (profile.totalReactionsReceived >= 1)        unlock("first_react")
+        if (profile.totalReactionsReceived >= 50)       unlock("popular")
+        if (profile.totalReactionsReceived >= 200)      unlock("viral")
+        if (profile.commentsCount >= 20)               unlock("commentator")
+        if (profile.confessionsCount >= 1)             unlock("confessor")
+        if (profile.confessionsCount >= 5)             unlock("dark_confessor")
+        if (profile.pollsCount >= 3)                   unlock("poll_creator")
+        if (profile.pollsCount >= 10)                  unlock("poll_master")
+        if (profile.convsStarted >= 5)                 unlock("social")
+        if (profile.storiesCount >= 5)                 unlock("storyteller")
+        if (profile.streak >= 3)                       unlock("streak_3")
+        if (profile.streak >= 7)                       unlock("streak_7")
+        if (profile.hasBadgeENI)                       unlock("eni_pride")
+        if (profile.badgeIds.isNotEmpty())             unlock("badge_maker")
+    }
+
+    // ── Badges ────────────────────────────────────────────────────────────────
+
+    private fun listenAllBadges() {
+        badgesJob?.cancel()
+        badgesJob = viewModelScope.launch {
+            repo.listenToAllBadges().collect { badges ->
+                _allBadges.value = badges
+                val myIds = _myProfile.value?.badgeIds ?: emptyList()
+                _myBadges.value = badges.filter { it.id in myIds }
+            }
+        }
+    }
+
+    fun createOrWearBadge(
+        displayName: String, colorHex: String,
+        onSuccess: () -> Unit, onError: (String) -> Unit
+    ) {
+        val profile    = _myProfile.value ?: return
+        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
+        viewModelScope.launch {
+            try {
+                val trimmed = displayName.trim()
+                if (trimmed.isBlank())
+                    return@launch onError("Le nom ne peut pas être vide")
+                if (trimmed.lowercase() == ADMIN_BADGE_NAME)
+                    return@launch onError("Ce nom est réservé")
+                val existing = repo.findBadgeByName(trimmed)
+                if (existing != null) {
+                    if (_myBadges.value.any { it.id == existing.id })
+                        return@launch onError("Tu portes déjà ce badge !")
+                    if (!userIsAdmin && _myBadges.value.isNotEmpty())
+                        return@launch onError("Retire ton badge actuel pour en porter un autre")
+                    repo.wearBadge(existing.id, currentUserId)
+                } else {
+                    if (!userIsAdmin && _myBadges.value.isNotEmpty())
+                        return@launch onError("Tu as déjà un badge. Retire-le d'abord")
+                    repo.createBadge(trimmed, colorHex, currentUserId)
+                }
+                val updated = repo.getProfile(currentUserId)
+                updated?.let { checkAchievements(it) }
+                onSuccess()
+            } catch (e: Exception) { onError(e.message ?: "Erreur") }
+        }
+    }
+
+    fun wearExistingBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val profile    = _myProfile.value ?: return
+        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
+        viewModelScope.launch {
+            try {
+                val badge = _allBadges.value.find { it.id == badgeId }
+                    ?: return@launch onError("Badge introuvable")
+                if (badge.name == ADMIN_BADGE_NAME)
+                    return@launch onError("Badge réservé à l'admin")
+                if (_myBadges.value.any { it.id == badgeId })
+                    return@launch onError("Tu portes déjà ce badge !")
+                if (!userIsAdmin && _myBadges.value.isNotEmpty())
+                    return@launch onError("Retire ton badge actuel avant")
+                repo.wearBadge(badgeId, currentUserId)
+                onSuccess()
+            } catch (e: Exception) { onError(e.message ?: "Erreur") }
+        }
+    }
+
+    fun unwearBadge(badgeId: String) = viewModelScope.launch {
+        runCatching { repo.unwearBadge(badgeId, currentUserId) }
+    }
+
+    fun updateBadge(
+        badgeId: String, displayName: String, colorHex: String,
+        onSuccess: () -> Unit, onError: (String) -> Unit
+    ) {
+        val profile    = _myProfile.value ?: return
+        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
+        viewModelScope.launch {
+            try {
+                val badge = _allBadges.value.find { it.id == badgeId }
+                    ?: return@launch onError("Badge introuvable")
+                if (!userIsAdmin && badge.createdBy != currentUserId)
+                    return@launch onError("Tu ne peux modifier que tes badges")
+                val trimmed = displayName.trim()
+                if (trimmed.isBlank()) return@launch onError("Nom vide")
+                if (trimmed.lowercase() != badge.name) {
+                    if (repo.findBadgeByName(trimmed) != null)
+                        return@launch onError("Ce nom existe déjà")
+                }
+                repo.updateBadge(badgeId, trimmed, colorHex)
+                onSuccess()
+            } catch (e: Exception) { onError(e.message ?: "Erreur") }
+        }
+    }
+
+    fun deleteBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val profile    = _myProfile.value ?: return
+        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
+        viewModelScope.launch {
+            try {
+                val badge = _allBadges.value.find { it.id == badgeId }
+                    ?: return@launch onError("Badge introuvable")
+                if (!userIsAdmin && badge.createdBy != currentUserId)
+                    return@launch onError("Tu ne peux supprimer que tes badges")
+                repo.deleteBadge(badgeId)
+                onSuccess()
+            } catch (e: Exception) { onError(e.message ?: "Erreur") }
+        }
+    }
 
     // ── Posts ─────────────────────────────────────────────────────────────────
 
     private fun listenPosts() {
-        feedJob?.cancel()
-        feedJob = viewModelScope.launch {
-            repo.listenToPosts().collect { newPosts ->
-                val prev = _posts.value
-                // Notification nouveau post
+        postsJob?.cancel()
+        postsJob = viewModelScope.launch {
+            repo.listenToPosts().collect { posts ->
+                val prev = _allPosts.value
                 if (prev.isNotEmpty() && notifyPosts.value) {
-                    newPosts.filter { n -> prev.none { it.id == n.id } }
-                        .filter { it.userId != currentUserId }
-                        .firstOrNull()
-                        ?.let { notif.showPostNotification(it.username, it.content) }
+                    posts.firstOrNull { n -> prev.none { it.id == n.id } && n.userId != currentUserId }
+                        ?.let { notif.showPostNotification(if (it.isAnonymous) "Quelqu'un 🎭" else it.username, it.content) }
                 }
-                _posts.value = newPosts.sortedWith(
-                    compareByDescending<Post> { it.isPinned }.thenByDescending { it.timestamp }
-                )
+                _allPosts.value   = posts
                 _isRefreshing.value = false
             }
         }
@@ -236,57 +380,140 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshFeed() {
         _isRefreshing.value = true
-        feedJob?.cancel()
         listenPosts()
     }
 
-    fun createPost(content: String) {
+    fun createPost(content: String, type: String = "normal",
+                   pollOpt1: String = "", pollOpt2: String = "") {
         val profile = _myProfile.value ?: return
+        val isConf  = type == "confession"
         viewModelScope.launch {
-            repo.createPost(mapOf(
-                "userId" to currentUserId,
-                "username" to profile.username,
-                "userPhotoUrl" to profile.photoUrl,
-                "content" to "Askip $content",
-                "likes" to 0,
-                "likedBy" to emptyList<String>(),
-                "commentCount" to 0,
-                "isPinned" to false,
-                "timestamp" to System.currentTimeMillis()
-            ))
+            runCatching {
+                repo.createPost(mapOf(
+                    "userId"       to currentUserId,
+                    "username"     to if (isConf) "Quelqu'un 🎭" else profile.username,
+                    "content"      to if (type != "poll") "Askip $content" else content,
+                    "postType"     to type,
+                    "isAnonymous"  to isConf,
+                    "pollOption1"  to pollOpt1,
+                    "pollOption2"  to pollOpt2,
+                    "pollVotes1"   to 0,
+                    "pollVotes2"   to 0,
+                    "pollVoters"   to emptyList<String>(),
+                    "likedBy"      to emptyList<String>(),
+                    "fireBy"       to emptyList<String>(),
+                    "lolBy"        to emptyList<String>(),
+                    "shockBy"      to emptyList<String>(),
+                    "eyesBy"       to emptyList<String>(),
+                    "commentCount" to 0,
+                    "isPinned"     to false,
+                    "timestamp"    to System.currentTimeMillis()
+                ))
+                val counterField = when (type) {
+                    "confession" -> "confessionsCount"
+                    "poll"       -> "pollsCount"
+                    else         -> "postsCount"
+                }
+                repo.incrementCounter(currentUserId, counterField)
+                repo.updateStreak(currentUserId)
+                repo.getProfile(currentUserId)?.let { checkAchievements(it) }
+            }.onFailure { error.value = it.message }
         }
     }
 
-    fun toggleLike(post: Post) {
-        val liked = post.likedBy.contains(currentUserId)
-        viewModelScope.launch { repo.toggleLike(post.id, currentUserId, liked) }
+    fun deletePost(postId: String) = viewModelScope.launch {
+        runCatching { repo.deletePost(postId) }
     }
 
-    fun togglePin(post: Post) = viewModelScope.launch { repo.togglePin(post.id, post.isPinned) }
-    fun deletePost(postId: String) = viewModelScope.launch { repo.deletePost(postId) }
+    fun togglePin(post: Post) = viewModelScope.launch {
+        runCatching { repo.togglePin(post.id, post.isPinned) }
+    }
+
+    fun toggleReaction(post: Post, emoji: String) {
+        val uid     = currentUserId
+        val current = post.getUserReaction(uid)
+        viewModelScope.launch {
+            runCatching {
+                if (current == emoji) repo.removeReaction(post.id, uid, emoji)
+                else {
+                    repo.addReaction(post.id, uid, emoji, current, post.userId)
+                    repo.getProfile(post.userId)?.let { checkAchievements(it) }
+                }
+            }
+        }
+    }
+
+    fun votePoll(postId: String, option: Int) {
+        val uid  = currentUserId
+        val post = _allPosts.value.find { it.id == postId } ?: return
+        if (uid in post.pollVoters) return
+        viewModelScope.launch { runCatching { repo.votePoll(postId, uid, option) } }
+    }
+
+    // ── Stories ───────────────────────────────────────────────────────────────
+
+    private fun listenStories() {
+        storiesJob?.cancel()
+        storiesJob = viewModelScope.launch {
+            repo.listenToStories().collect { _stories.value = it }
+        }
+    }
+
+    fun createStory(content: String, emoji: String, bgColor: String) {
+        val profile = _myProfile.value ?: return
+        viewModelScope.launch {
+            runCatching {
+                val now = System.currentTimeMillis()
+                repo.createStory(mapOf(
+                    "userId"          to currentUserId,
+                    "username"        to profile.username,
+                    "content"         to content,
+                    "emoji"           to emoji,
+                    "backgroundColor" to bgColor,
+                    "timestamp"       to now,
+                    "expiresAt"       to (now + 24L * 3600_000L)
+                ))
+                repo.incrementCounter(currentUserId, "storiesCount")
+                repo.updateStreak(currentUserId)
+                repo.getProfile(currentUserId)?.let { checkAchievements(it) }
+            }.onFailure { error.value = it.message }
+        }
+    }
+
+    fun deleteStory(storyId: String) = viewModelScope.launch {
+        runCatching { repo.deleteStory(storyId) }
+    }
 
     // ── Comments ──────────────────────────────────────────────────────────────
 
-    fun listenComments(postId: String) = viewModelScope.launch {
-        repo.listenToComments(postId).collect { _comments.value = it }
+    fun listenComments(postId: String) {
+        commentJob?.cancel()
+        commentJob = viewModelScope.launch {
+            repo.listenToComments(postId).collect { _comments.value = it }
+        }
     }
 
     fun addComment(postId: String, content: String) {
         val profile = _myProfile.value ?: return
         viewModelScope.launch {
-            repo.addComment(postId, mapOf(
-                "postId" to postId,
-                "userId" to currentUserId,
-                "username" to profile.username,
-                "userPhotoUrl" to profile.photoUrl,
-                "content" to content,
-                "timestamp" to System.currentTimeMillis()
-            ))
+            runCatching {
+                repo.addComment(postId, mapOf(
+                    "postId"    to postId,
+                    "userId"    to currentUserId,
+                    "username"  to profile.username,
+                    "content"   to content,
+                    "timestamp" to System.currentTimeMillis()
+                ))
+                repo.incrementCounter(currentUserId, "commentsCount")
+                repo.updateStreak(currentUserId)
+                repo.getProfile(currentUserId)?.let { checkAchievements(it) }
+            }
         }
     }
 
-    fun deleteComment(postId: String, commentId: String) =
-        viewModelScope.launch { repo.deleteComment(postId, commentId) }
+    fun deleteComment(postId: String, commentId: String) = viewModelScope.launch {
+        runCatching { repo.deleteComment(postId, commentId) }
+    }
 
     // ── Conversations ─────────────────────────────────────────────────────────
 
@@ -297,19 +524,15 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startConversation(
-        otherUserId: String, otherUsername: String, otherPhotoUrl: String,
-        onDone: (String) -> Unit
-    ) {
+    fun startConversation(otherId: String, otherUsername: String, onDone: (String) -> Unit) {
         val me = _myProfile.value ?: return
         viewModelScope.launch {
-            try {
-                val convId = repo.startOrGetConversation(
-                    currentUserId, me.username, me.photoUrl,
-                    otherUserId, otherUsername, otherPhotoUrl
-                )
+            runCatching {
+                val convId = repo.getOrCreateConversation(currentUserId, me.username, otherId, otherUsername)
+                repo.incrementCounter(currentUserId, "convsStarted")
+                repo.getProfile(currentUserId)?.let { checkAchievements(it) }
                 onDone(convId)
-            } catch (e: Exception) { error.value = e.message }
+            }.onFailure { error.value = it.message }
         }
     }
 
@@ -318,11 +541,8 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         msgJob = viewModelScope.launch {
             repo.listenToMessages(convId).collect { newMsgs ->
                 val prev = _messages.value
-                // Notification nouveau message (app ouverte)
                 if (prev.isNotEmpty() && notifyMessages.value) {
-                    newMsgs.filter { n -> prev.none { it.id == n.id } }
-                        .filter { it.senderId != currentUserId }
-                        .firstOrNull()
+                    newMsgs.firstOrNull { n -> prev.none { it.id == n.id } && n.senderId != currentUserId }
                         ?.let { notif.showMessageNotification(it.senderUsername, it.content) }
                 }
                 _messages.value = newMsgs
@@ -331,168 +551,29 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendMessage(convId: String, content: String) {
-        val profile = _myProfile.value ?: return
-        val conv = _conversations.value.find { it.id == convId } ?: return
+        val profile    = _myProfile.value ?: return
+        val conv       = _conversations.value.find { it.id == convId } ?: return
         val receiverId = conv.participants.firstOrNull { it != currentUserId } ?: return
         viewModelScope.launch {
-            repo.sendMessage(convId, mapOf(
-                "conversationId" to convId,
-                "senderId" to currentUserId,
-                "senderUsername" to profile.username,
-                "senderPhotoUrl" to profile.photoUrl,
-                "content" to content,
-                "timestamp" to System.currentTimeMillis(),
-                "readBy" to listOf(currentUserId)
-            ), receiverId)
+            runCatching {
+                repo.sendMessage(convId, mapOf(
+                    "conversationId" to convId,
+                    "senderId"       to currentUserId,
+                    "senderUsername" to profile.username,
+                    "content"        to content,
+                    "timestamp"      to System.currentTimeMillis()
+                ), receiverId)
+            }
         }
     }
 
-    fun markConversationRead(convId: String) = viewModelScope.launch {
-        try { repo.markConversationRead(convId, currentUserId) } catch (_: Exception) {}
-    }
+    fun markRead(convId: String) = viewModelScope.launch { repo.markRead(convId, currentUserId) }
 
-    fun getUnreadCount(conv: Conversation): Int =
-        (conv.unreadCounts[currentUserId] ?: 0L).toInt()
-
-    // ── Badges ────────────────────────────────────────────────────────────────
-
-    private fun listenAllBadges() {
-        badgesJob?.cancel()
-        badgesJob = viewModelScope.launch {
-            repo.listenToAllBadges().collect { _allBadges.value = it }
-        }
-    }
-
-    fun getBadgesForProfile(profile: UserProfile): List<Badge> =
-        _allBadges.value.filter { it.id in profile.badgeIds }
-
-    /**
-     * Logique badge :
-     * - Si le nom existe → le profil le portera (sauf badge "admin")
-     * - Sinon → créer + porter
-     * - Non-admin : 1 badge max (mais peut choisir parmi existants, pas créer si déjà 1)
-     * - Admin : illimité
-     */
-    fun createOrWearBadge(
-        displayName: String,
-        colorHex: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val profile = _myProfile.value ?: return
-        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
-        viewModelScope.launch {
-            try {
-                val trimmedName = displayName.trim()
-                if (trimmedName.isBlank()) { onError("Le nom ne peut pas être vide"); return@launch }
-                if (trimmedName.lowercase() == ADMIN_BADGE_NAME) {
-                    onError("Ce nom est réservé à l'administration"); return@launch
-                }
-
-                val existing = repo.findBadgeByName(trimmedName)
-                if (existing != null) {
-                    // Badge existe → le porter si pas déjà porté
-                    if (existing.id in profile.badgeIds) {
-                        onError("Tu portes déjà ce badge !"); return@launch
-                    }
-                    if (!userIsAdmin && profile.badgeIds.isNotEmpty()) {
-                        onError("Tu dois d'abord retirer ton badge actuel pour en porter un autre")
-                        return@launch
-                    }
-                    repo.wearBadge(existing.id, currentUserId)
-                } else {
-                    // Badge n'existe pas → le créer
-                    if (!userIsAdmin && profile.badgeIds.isNotEmpty()) {
-                        onError("Tu as déjà un badge. Retire-le ou choisis un badge existant")
-                        return@launch
-                    }
-                    repo.createBadge(Badge(displayName = trimmedName, colorHex = colorHex), currentUserId)
-                }
-                onSuccess()
-            } catch (e: Exception) { onError(e.message ?: "Erreur") }
-        }
-    }
-
-    /** Porter un badge existant (depuis la liste) */
-    fun wearExistingBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val profile = _myProfile.value ?: return
-        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
-        val badge = _allBadges.value.find { it.id == badgeId } ?: return
-
-        viewModelScope.launch {
-            try {
-                if (badge.name == ADMIN_BADGE_NAME) {
-                    onError("Ce badge est réservé à l'administration"); return@launch
-                }
-                if (badgeId in profile.badgeIds) {
-                    onError("Tu portes déjà ce badge !"); return@launch
-                }
-                if (!userIsAdmin && profile.badgeIds.isNotEmpty()) {
-                    onError("Retire ton badge actuel avant d'en porter un autre"); return@launch
-                }
-                repo.wearBadge(badgeId, currentUserId)
-                onSuccess()
-            } catch (e: Exception) { onError(e.message ?: "Erreur") }
-        }
-    }
-
-    /** Ne plus porter un badge */
-    fun unwearBadge(badgeId: String) = viewModelScope.launch {
-        try { repo.unwearBadge(badgeId, currentUserId) } catch (e: Exception) { error.value = e.message }
-    }
-
-    /** Modifier un badge (seulement son créateur ou l'admin) */
-    fun updateBadge(
-        badgeId: String, displayName: String, colorHex: String,
-        onSuccess: () -> Unit, onError: (String) -> Unit
-    ) {
-        val profile = _myProfile.value ?: return
-        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
-        val badge = _allBadges.value.find { it.id == badgeId }
-
-        viewModelScope.launch {
-            try {
-                if (badge == null) { onError("Badge introuvable"); return@launch }
-                if (!userIsAdmin && badge.createdBy != currentUserId) {
-                    onError("Tu ne peux modifier que tes propres badges"); return@launch
-                }
-                val trimmed = displayName.trim()
-                if (trimmed.isBlank()) { onError("Nom vide"); return@launch }
-                if (trimmed.lowercase() == ADMIN_BADGE_NAME) {
-                    onError("Ce nom est réservé"); return@launch
-                }
-                // Vérifier unicité si le nom change
-                if (trimmed.lowercase() != badge.name) {
-                    val existing = repo.findBadgeByName(trimmed)
-                    if (existing != null) { onError("Ce nom de badge existe déjà"); return@launch }
-                }
-                repo.updateBadge(badgeId, trimmed, colorHex)
-                onSuccess()
-            } catch (e: Exception) { onError(e.message ?: "Erreur") }
-        }
-    }
-
-    /** Supprimer un badge (seulement son créateur ou l'admin) */
-    fun deleteBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val profile = _myProfile.value ?: return
-        val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
-        val badge = _allBadges.value.find { it.id == badgeId }
-
-        viewModelScope.launch {
-            try {
-                if (badge == null) { onError("Badge introuvable"); return@launch }
-                if (!userIsAdmin && badge.createdBy != currentUserId) {
-                    onError("Tu ne peux supprimer que tes propres badges"); return@launch
-                }
-                repo.deleteBadge(badgeId)
-                onSuccess()
-            } catch (e: Exception) { onError(e.message ?: "Erreur") }
-        }
-    }
+    fun getUnread(conv: Conversation) = (conv.unreadCounts[currentUserId] ?: 0L).toInt()
 
     // ── Settings ──────────────────────────────────────────────────────────────
 
     fun setNotifyMessages(v: Boolean) = viewModelScope.launch { settings.setNotifyMessages(v) }
-    fun setNotifyPosts(v: Boolean) = viewModelScope.launch { settings.setNotifyPosts(v) }
+    fun setNotifyPosts(v: Boolean)    = viewModelScope.launch { settings.setNotifyPosts(v) }
     fun clearError() { error.value = null }
 }

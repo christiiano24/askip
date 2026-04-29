@@ -2,24 +2,19 @@ package com.rnandresy.lol.repository
 
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.rnandresy.lol.model.Badge
-import com.rnandresy.lol.model.Comment
-import com.rnandresy.lol.model.Conversation
-import com.rnandresy.lol.model.Message
-import com.rnandresy.lol.model.Post
-import com.rnandresy.lol.model.UserProfile
+import com.google.firebase.firestore.*
+import com.rnandresy.lol.model.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.*
 
 class FirebaseRepository {
 
     private val auth = FirebaseAuth.getInstance()
-    private val db = FirebaseFirestore.getInstance()
+    private val db   = FirebaseFirestore.getInstance()
 
     // ── AUTH ──────────────────────────────────────────────────────────────────
 
@@ -28,221 +23,126 @@ class FirebaseRepository {
     }
 
     suspend fun register(email: String, password: String): String {
-        val result = auth.createUserWithEmailAndPassword(email, password).await()
-        return result.user?.uid ?: error("UID null")
+        val r = auth.createUserWithEmailAndPassword(email, password).await()
+        return r.user?.uid ?: error("UID null")
     }
 
-    fun logout() = auth.signOut()
+    suspend fun logout() = auth.signOut()
 
     suspend fun updateEmail(newEmail: String, password: String) {
         val user = auth.currentUser ?: error("Non connecté")
-        val cred = EmailAuthProvider.getCredential(user.email!!, password)
-        user.reauthenticate(cred).await()
+        user.reauthenticate(EmailAuthProvider.getCredential(user.email!!, password)).await()
         user.verifyBeforeUpdateEmail(newEmail).await()
     }
 
-    suspend fun updatePassword(current: String, newPassword: String) {
+    suspend fun updatePassword(current: String, newPwd: String) {
         val user = auth.currentUser ?: error("Non connecté")
-        val cred = EmailAuthProvider.getCredential(user.email!!, current)
-        user.reauthenticate(cred).await()
-        user.updatePassword(newPassword).await()
+        user.reauthenticate(EmailAuthProvider.getCredential(user.email!!, current)).await()
+        user.updatePassword(newPwd).await()
     }
+
+    fun currentUserId() = auth.currentUser?.uid ?: ""
+    fun currentEmail()  = auth.currentUser?.email ?: ""
+    fun isLoggedIn()    = auth.currentUser != null
 
     // ── PROFILES ──────────────────────────────────────────────────────────────
 
     suspend fun createDefaultProfile(uid: String, username: String) {
-        db.collection("profiles").document(uid).set(
-            mapOf(
-                "userId" to uid,
-                "username" to username,
-                "age" to 0,
-                "photoUrl" to "",
-                "relationshipStatus" to "",
-                "classeENI" to "",
-                "bio" to "",
-                "badgeIds" to emptyList<String>(),
-                "fcmToken" to "",
-                "hasBadgeENI" to false,
-                "isAdmin" to false
-            )
-        ).await()
+        db.collection("profiles").document(uid).set(mapOf(
+            "userId" to uid, "username" to username, "age" to 0, "bio" to "",
+            "classeENI" to "", "relationshipStatus" to "",
+            "themeColor" to "#7C4DFF", "avatarFrame" to "none",
+            "moodEmoji" to "", "moodText" to "",
+            "badgeIds" to emptyList<String>(),
+            "postsCount" to 0, "commentsCount" to 0, "confessionsCount" to 0,
+            "storiesCount" to 0, "pollsCount" to 0, "convsStarted" to 0,
+            "totalReactionsReceived" to 0, "streak" to 0, "lastActiveDate" to "",
+            "hasBadgeENI" to false, "isAdmin" to false
+        )).await()
     }
 
     fun listenToProfile(uid: String): Flow<UserProfile?> = callbackFlow {
         val l = db.collection("profiles").document(uid)
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.toObject(UserProfile::class.java))
-            }
+            .addSnapshotListener { s, _ -> trySend(s?.toObject(UserProfile::class.java)) }
         awaitClose { l.remove() }
     }
 
-    suspend fun updateProfile(uid: String, data: Map<String, Any>) {
-        db.collection("profiles").document(uid).update(data).await()
-    }
+    suspend fun getProfile(uid: String): UserProfile? = runCatching {
+        db.collection("profiles").document(uid).get().await()
+            .toObject(UserProfile::class.java)
+    }.getOrNull()
 
     fun listenToAllProfiles(): Flow<List<UserProfile>> = callbackFlow {
-        val l = db.collection("profiles")
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.documents?.mapNotNull { it.toObject(UserProfile::class.java) } ?: emptyList())
-            }
+        val l = db.collection("profiles").addSnapshotListener { s, _ ->
+            trySend(s?.documents?.mapNotNull { it.toObject(UserProfile::class.java) } ?: emptyList())
+        }
         awaitClose { l.remove() }
     }
 
-    suspend fun updateFcmToken(uid: String, token: String) {
-        try {
-            db.collection("profiles").document(uid).update("fcmToken", token).await()
-        } catch (_: Exception) {}
+    suspend fun updateProfile(uid: String, data: Map<String, Any?>) {
+        val clean = data.filterValues { it != null } as Map<String, Any>
+        if (clean.isNotEmpty())
+            db.collection("profiles").document(uid).update(clean).await()
     }
 
-    // ── POSTS ─────────────────────────────────────────────────────────────────
-
-    fun listenToPosts(): Flow<List<Post>> = callbackFlow {
-        val l = db.collection("posts")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, _ ->
-                val posts = snap?.documents?.mapNotNull { doc ->
-                    doc.toObject(Post::class.java)?.copy(id = doc.id)
-                } ?: emptyList()
-                trySend(posts)
-            }
-        awaitClose { l.remove() }
-    }
-
-    suspend fun createPost(post: Map<String, Any>) {
-        val ref = db.collection("posts").document()
-        ref.set(post + mapOf("id" to ref.id)).await()
-    }
-
-    suspend fun toggleLike(postId: String, userId: String, liked: Boolean) {
-        val ref = db.collection("posts").document(postId)
-        if (liked) {
-            ref.update("likedBy", FieldValue.arrayRemove(userId), "likes", FieldValue.increment(-1)).await()
-        } else {
-            ref.update("likedBy", FieldValue.arrayUnion(userId), "likes", FieldValue.increment(1)).await()
+    suspend fun incrementCounter(uid: String, field: String, by: Long = 1L) {
+        runCatching {
+            db.collection("profiles").document(uid)
+                .update(field, FieldValue.increment(by)).await()
         }
     }
 
-    suspend fun togglePin(postId: String, pinned: Boolean) {
-        db.collection("posts").document(postId).update("isPinned", !pinned).await()
+    suspend fun updateStreak(uid: String) {
+        val profile = getProfile(uid) ?: return
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        if (profile.lastActiveDate == today) return
+        val yesterday = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            .format(Date(System.currentTimeMillis() - 86_400_000L))
+        val newStreak = if (profile.lastActiveDate == yesterday) profile.streak + 1 else 1
+        db.collection("profiles").document(uid)
+            .update("streak", newStreak, "lastActiveDate", today).await()
     }
 
-    suspend fun deletePost(postId: String) {
-        db.collection("posts").document(postId).delete().await()
-    }
+    // ── ACHIEVEMENTS ──────────────────────────────────────────────────────────
 
-    // ── COMMENTS ──────────────────────────────────────────────────────────────
+    suspend fun getAchievements(uid: String): List<Achievement> = runCatching {
+        db.collection("profiles").document(uid).collection("achievements")
+            .get().await().documents.mapNotNull { it.toObject(Achievement::class.java) }
+    }.getOrElse { emptyList() }
 
-    fun listenToComments(postId: String): Flow<List<Comment>> = callbackFlow {
-        val l = db.collection("posts").document(postId).collection("comments")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.documents?.mapNotNull { it.toObject(Comment::class.java)?.copy(id = it.id) } ?: emptyList())
-            }
-        awaitClose { l.remove() }
-    }
-
-    suspend fun addComment(postId: String, comment: Map<String, Any>) {
-        val ref = db.collection("posts").document(postId).collection("comments").document()
-        ref.set(comment + mapOf("id" to ref.id)).await()
-        db.collection("posts").document(postId).update("commentCount", FieldValue.increment(1)).await()
-    }
-
-    suspend fun deleteComment(postId: String, commentId: String) {
-        db.collection("posts").document(postId).collection("comments").document(commentId).delete().await()
-        db.collection("posts").document(postId).update("commentCount", FieldValue.increment(-1)).await()
-    }
-
-    // ── CONVERSATIONS ─────────────────────────────────────────────────────────
-
-    fun listenToConversations(uid: String): Flow<List<Conversation>> = callbackFlow {
-        val l = db.collection("conversations")
-            .whereArrayContains("participants", uid)
-            .addSnapshotListener { snap, _ ->
-                val list = snap?.documents?.mapNotNull {
-                    it.toObject(Conversation::class.java)?.copy(id = it.id)
-                }?.sortedByDescending { it.lastTimestamp } ?: emptyList()
-                trySend(list)
-            }
-        awaitClose { l.remove() }
-    }
-
-    suspend fun startOrGetConversation(
-        meId: String, meUsername: String, mePhoto: String,
-        otherId: String, otherUsername: String, otherPhoto: String
-    ): String {
-        val ids = listOf(meId, otherId).sorted()
-        val convId = "${ids[0]}_${ids[1]}"
-        val ref = db.collection("conversations").document(convId)
+    suspend fun unlockAchievement(uid: String, id: String) {
+        val ref = db.collection("profiles").document(uid)
+            .collection("achievements").document(id)
         if (!ref.get().await().exists()) {
-            ref.set(mapOf(
-                "id" to convId,
-                "participants" to ids,
-                "participantNames" to mapOf(meId to meUsername, otherId to otherUsername),
-                "participantPhotos" to mapOf(meId to mePhoto, otherId to otherPhoto),
-                "lastMessage" to "",
-                "lastSenderId" to "",
-                "lastTimestamp" to 0L,
-                "unreadCounts" to mapOf(meId to 0L, otherId to 0L)
-            )).await()
+            ref.set(mapOf("id" to id, "unlockedAt" to System.currentTimeMillis())).await()
         }
-        return convId
-    }
-
-    fun listenToMessages(convId: String): Flow<List<Message>> = callbackFlow {
-        val l = db.collection("conversations").document(convId).collection("messages")
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.documents?.mapNotNull { it.toObject(Message::class.java)?.copy(id = it.id) } ?: emptyList())
-            }
-        awaitClose { l.remove() }
-    }
-
-    suspend fun sendMessage(convId: String, message: Map<String, Any>, receiverId: String) {
-        val ref = db.collection("conversations").document(convId).collection("messages").document()
-        ref.set(message + mapOf("id" to ref.id)).await()
-        db.collection("conversations").document(convId).update(
-            "lastMessage", message["content"],
-            "lastSenderId", message["senderId"],
-            "lastTimestamp", message["timestamp"],
-            "unreadCounts.$receiverId", FieldValue.increment(1)
-        ).await()
-    }
-
-    suspend fun markConversationRead(convId: String, uid: String) {
-        try {
-            db.collection("conversations").document(convId).update("unreadCounts.$uid", 0L).await()
-        } catch (_: Exception) {}
     }
 
     // ── BADGES ────────────────────────────────────────────────────────────────
 
     fun listenToAllBadges(): Flow<List<Badge>> = callbackFlow {
-        val l = db.collection("badges")
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.documents?.mapNotNull { it.toObject(Badge::class.java) } ?: emptyList())
-            }
+        val l = db.collection("badges").addSnapshotListener { s, _ ->
+            trySend(s?.documents?.mapNotNull { it.toObject(Badge::class.java) } ?: emptyList())
+        }
         awaitClose { l.remove() }
     }
 
-    /** Vérifie si un badge avec ce nom (lowercase) existe déjà, retourne son ID ou null */
-    suspend fun findBadgeByName(name: String): Badge? {
-        val snap = db.collection("badges")
+    suspend fun findBadgeByName(name: String): Badge? = runCatching {
+        db.collection("badges")
             .whereEqualTo("name", name.trim().lowercase())
-            .get().await()
-        return snap.documents.firstOrNull()?.toObject(Badge::class.java)
-    }
+            .get().await().documents.firstOrNull()?.toObject(Badge::class.java)
+    }.getOrNull()
 
-    suspend fun createBadge(badge: Badge, userId: String): String {
+    suspend fun createBadge(displayName: String, colorHex: String, userId: String): String {
         val ref = db.collection("badges").document()
-        val b = badge.copy(
-            id = ref.id,
-            name = badge.displayName.trim().lowercase(),
-            displayName = badge.displayName.trim(),
-            createdBy = userId,
-            createdAt = System.currentTimeMillis()
-        )
-        ref.set(b).await()
-        // L'utilisateur porte ce badge
+        ref.set(mapOf(
+            "id"          to ref.id,
+            "name"        to displayName.trim().lowercase(),
+            "displayName" to displayName.trim(),
+            "colorHex"    to colorHex,
+            "createdBy"   to userId,
+            "createdAt"   to System.currentTimeMillis()
+        )).await()
         db.collection("profiles").document(userId)
             .update("badgeIds", FieldValue.arrayUnion(ref.id)).await()
         return ref.id
@@ -251,32 +151,194 @@ class FirebaseRepository {
     suspend fun updateBadge(badgeId: String, displayName: String, colorHex: String) {
         db.collection("badges").document(badgeId).update(
             "displayName", displayName.trim(),
-            "name", displayName.trim().lowercase(),
-            "colorHex", colorHex
+            "name",        displayName.trim().lowercase(),
+            "colorHex",    colorHex
         ).await()
     }
 
     suspend fun deleteBadge(badgeId: String) {
-        // Supprimer le badge
-        db.collection("badges").document(badgeId).delete().await()
-        // Retirer ce badge de TOUS les profils qui le portent
+        // Retirer de tous les profils
         val profiles = db.collection("profiles")
-            .whereArrayContains("badgeIds", badgeId)
-            .get().await()
-        profiles.documents.forEach { doc ->
-            doc.reference.update("badgeIds", FieldValue.arrayRemove(badgeId))
-        }
+            .whereArrayContains("badgeIds", badgeId).get().await()
+        profiles.documents.forEach { it.reference.update("badgeIds", FieldValue.arrayRemove(badgeId)) }
+        db.collection("badges").document(badgeId).delete().await()
     }
 
-    /** Ajouter un badge existant au profil (le "porter") */
     suspend fun wearBadge(badgeId: String, userId: String) {
         db.collection("profiles").document(userId)
             .update("badgeIds", FieldValue.arrayUnion(badgeId)).await()
     }
 
-    /** Retirer un badge du profil (ne plus le porter, sans supprimer le badge) */
     suspend fun unwearBadge(badgeId: String, userId: String) {
         db.collection("profiles").document(userId)
             .update("badgeIds", FieldValue.arrayRemove(badgeId)).await()
+    }
+
+    // ── POSTS ─────────────────────────────────────────────────────────────────
+
+    fun listenToPosts(): Flow<List<Post>> = callbackFlow {
+        val l = db.collection("posts")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { s, _ ->
+                trySend(s?.documents?.mapNotNull {
+                    it.toObject(Post::class.java)?.copy(id = it.id)
+                } ?: emptyList())
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun createPost(data: Map<String, Any>): String {
+        val ref = db.collection("posts").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
+        return ref.id
+    }
+
+    suspend fun deletePost(postId: String) {
+        db.collection("posts").document(postId).delete().await()
+    }
+
+    suspend fun togglePin(postId: String, pinned: Boolean) {
+        db.collection("posts").document(postId).update("isPinned", !pinned).await()
+    }
+
+    suspend fun addReaction(postId: String, uid: String, emoji: String,
+                            oldEmoji: String?, postOwnerId: String) {
+        val ref = db.collection("posts").document(postId)
+        val batch = db.batch()
+        if (oldEmoji != null)
+            batch.update(ref, Post.reactionFieldFor(oldEmoji), FieldValue.arrayRemove(uid))
+        batch.update(ref, Post.reactionFieldFor(emoji), FieldValue.arrayUnion(uid))
+        batch.commit().await()
+        if (postOwnerId != uid)
+            runCatching { incrementCounter(postOwnerId, "totalReactionsReceived") }
+    }
+
+    suspend fun removeReaction(postId: String, uid: String, emoji: String) {
+        db.collection("posts").document(postId)
+            .update(Post.reactionFieldFor(emoji), FieldValue.arrayRemove(uid)).await()
+    }
+
+    suspend fun votePoll(postId: String, uid: String, option: Int) {
+        val field = if (option == 1) "pollVotes1" else "pollVotes2"
+        db.collection("posts").document(postId).update(
+            "pollVoters", FieldValue.arrayUnion(uid),
+            field, FieldValue.increment(1)
+        ).await()
+    }
+
+    // ── COMMENTS ──────────────────────────────────────────────────────────────
+
+    fun listenToComments(postId: String): Flow<List<Comment>> = callbackFlow {
+        val l = db.collection("posts").document(postId).collection("comments")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { s, _ ->
+                trySend(s?.documents?.mapNotNull {
+                    it.toObject(Comment::class.java)?.copy(id = it.id)
+                } ?: emptyList())
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun addComment(postId: String, data: Map<String, Any>) {
+        val ref = db.collection("posts").document(postId).collection("comments").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
+        db.collection("posts").document(postId)
+            .update("commentCount", FieldValue.increment(1)).await()
+    }
+
+    suspend fun deleteComment(postId: String, commentId: String) {
+        db.collection("posts").document(postId)
+            .collection("comments").document(commentId).delete().await()
+        db.collection("posts").document(postId)
+            .update("commentCount", FieldValue.increment(-1)).await()
+    }
+
+    // ── STORIES ───────────────────────────────────────────────────────────────
+
+    fun listenToStories(): Flow<List<Story>> = callbackFlow {
+        val l = db.collection("stories")
+            .whereGreaterThan("expiresAt", System.currentTimeMillis())
+            .orderBy("expiresAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { s, _ ->
+                trySend(s?.documents?.mapNotNull {
+                    it.toObject(Story::class.java)?.copy(id = it.id)
+                } ?: emptyList())
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun createStory(data: Map<String, Any>) {
+        val ref = db.collection("stories").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
+    }
+
+    suspend fun deleteStory(storyId: String) {
+        db.collection("stories").document(storyId).delete().await()
+    }
+
+    // ── CONVERSATIONS ─────────────────────────────────────────────────────────
+
+    fun listenToConversations(uid: String): Flow<List<Conversation>> = callbackFlow {
+        val l = db.collection("conversations")
+            .whereArrayContains("participants", uid)
+            .addSnapshotListener { s, _ ->
+                trySend(
+                    (s?.documents?.mapNotNull {
+                        it.toObject(Conversation::class.java)?.copy(id = it.id)
+                    } ?: emptyList()).sortedByDescending { it.lastTimestamp }
+                )
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun getOrCreateConversation(
+        meId: String, meUsername: String,
+        otherId: String, otherUsername: String
+    ): String {
+        val ids   = listOf(meId, otherId).sorted()
+        val convId = "${ids[0]}_${ids[1]}"
+        val ref   = db.collection("conversations").document(convId)
+        if (!ref.get().await().exists()) {
+            ref.set(mapOf(
+                "id"               to convId,
+                "participants"     to ids,
+                "participantNames" to mapOf(meId to meUsername, otherId to otherUsername),
+                "lastMessage"      to "",
+                "lastSenderId"     to "",
+                "lastTimestamp"    to 0L,
+                "unreadCounts"     to mapOf(meId to 0L, otherId to 0L)
+            )).await()
+        }
+        return convId
+    }
+
+    fun listenToMessages(convId: String): Flow<List<Message>> = callbackFlow {
+        val l = db.collection("conversations").document(convId).collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { s, _ ->
+                trySend(s?.documents?.mapNotNull {
+                    it.toObject(Message::class.java)?.copy(id = it.id)
+                } ?: emptyList())
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun sendMessage(convId: String, data: Map<String, Any>, receiverId: String) {
+        val ref = db.collection("conversations").document(convId)
+            .collection("messages").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
+        db.collection("conversations").document(convId).update(
+            "lastMessage",           data["content"] ?: "",
+            "lastSenderId",          data["senderId"] ?: "",
+            "lastTimestamp",         data["timestamp"] ?: 0L,
+            "unreadCounts.$receiverId", FieldValue.increment(1)
+        ).await()
+    }
+
+    suspend fun markRead(convId: String, uid: String) {
+        runCatching {
+            db.collection("conversations").document(convId)
+                .update("unreadCounts.$uid", 0L).await()
+        }
     }
 }

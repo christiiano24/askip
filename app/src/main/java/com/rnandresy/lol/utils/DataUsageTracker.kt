@@ -4,27 +4,17 @@ import android.net.TrafficStats
 import android.os.Process
 
 class DataUsageTracker {
-    private val sessionStartRx: Long
-    private val sessionStartTx: Long
+    private val uid     = Process.myUid()
+    private val startRx = safeBytes { TrafficStats.getUidRxBytes(uid) }
+    private val startTx = safeBytes { TrafficStats.getUidTxBytes(uid) }
 
-    init {
-        sessionStartRx = getSafeUidRxBytes()
-        sessionStartTx = getSafeUidTxBytes()
-    }
-
-    private fun getSafeUidRxBytes(): Long {
-        val v = TrafficStats.getUidRxBytes(Process.myUid())
-        return if (v == TrafficStats.UNSUPPORTED.toLong()) 0L else v
-    }
-
-    private fun getSafeUidTxBytes(): Long {
-        val v = TrafficStats.getUidTxBytes(Process.myUid())
-        return if (v == TrafficStats.UNSUPPORTED.toLong()) 0L else v
-    }
+    private fun safeBytes(block: () -> Long): Long = runCatching {
+        block().takeIf { it != TrafficStats.UNSUPPORTED.toLong() } ?: 0L
+    }.getOrElse { 0L }
 
     fun getSessionBytes(): Long {
-        val rx = (getSafeUidRxBytes() - sessionStartRx).coerceAtLeast(0)
-        val tx = (getSafeUidTxBytes() - sessionStartTx).coerceAtLeast(0)
+        val rx = (safeBytes { TrafficStats.getUidRxBytes(uid) } - startRx).coerceAtLeast(0L)
+        val tx = (safeBytes { TrafficStats.getUidTxBytes(uid) } - startTx).coerceAtLeast(0L)
         return rx + tx
     }
 

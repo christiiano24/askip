@@ -6,12 +6,59 @@ data class Post(
     val id: String = "",
     val userId: String = "",
     val username: String = "",
-    val userPhotoUrl: String = "",
     val content: String = "",
-    val likes: Int = 0,
+    val postType: String = "normal",   // "normal" | "poll" | "confession"
+    @get:PropertyName("isAnonymous")
+    @set:PropertyName("isAnonymous")
+    var isAnonymous: Boolean = false,
+    // Sondage
+    val pollOption1: String = "",
+    val pollOption2: String = "",
+    val pollVotes1: Int = 0,
+    val pollVotes2: Int = 0,
+    val pollVoters: List<String> = emptyList(),
+    // Réactions
     val likedBy: List<String> = emptyList(),
+    val fireBy: List<String> = emptyList(),
+    val lolBy: List<String> = emptyList(),
+    val shockBy: List<String> = emptyList(),
+    val eyesBy: List<String> = emptyList(),
+    // Meta
     val commentCount: Int = 0,
-    val timestamp: Long = 0L,
-    @get:PropertyName("isPinned") @set:PropertyName("isPinned")
-    var isPinned: Boolean = false
-)
+    @get:PropertyName("isPinned")
+    @set:PropertyName("isPinned")
+    var isPinned: Boolean = false,
+    val timestamp: Long = 0L
+) {
+    fun getUserReaction(uid: String): String? = when {
+        uid in likedBy -> "❤️"
+        uid in fireBy  -> "🔥"
+        uid in lolBy   -> "😂"
+        uid in shockBy -> "😱"
+        uid in eyesBy  -> "👀"
+        else           -> null
+    }
+
+    fun reactionCount(emoji: String): Int = when (emoji) {
+        "❤️" -> likedBy.size
+        "🔥" -> fireBy.size
+        "😂" -> lolBy.size
+        "😱" -> shockBy.size
+        "👀" -> eyesBy.size
+        else -> 0
+    }
+
+    val totalReactions get() =
+        likedBy.size + fireBy.size + lolBy.size + shockBy.size + eyesBy.size
+
+    companion object {
+        fun reactionFieldFor(emoji: String): String = when (emoji) {
+            "❤️" -> "likedBy"
+            "🔥" -> "fireBy"
+            "😂" -> "lolBy"
+            "😱" -> "shockBy"
+            "👀" -> "eyesBy"
+            else -> "likedBy"
+        }
+    }
+}

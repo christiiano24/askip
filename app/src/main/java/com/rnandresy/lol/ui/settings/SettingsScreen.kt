@@ -14,8 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Feed
 import androidx.compose.material.icons.filled.Lock
@@ -32,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,98 +55,172 @@ import com.rnandresy.lol.viewmodel.AskipViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    viewModel: AskipViewModel,
-    onLogout: () -> Unit
+    vm: AskipViewModel,
+    onLogout: () -> Unit,
+    onBack: () -> Unit
 ) {
-    val notifyMessages by viewModel.notifyMessages.collectAsState()
-    val notifyPosts by viewModel.notifyPosts.collectAsState()
-    val totalBytes by viewModel.totalBytesStored.collectAsState()
-
-    val sessionMB = remember { viewModel.dataTracker.getSessionMB() }
-    val totalMB = totalBytes / (1024f * 1024f)
+    val notifyMsg   by vm.notifyMessages.collectAsState()
+    val notifyPost  by vm.notifyPosts.collectAsState()
+    val totalBytes  by vm.totalBytesStored.collectAsState()
+    val sessionMB    = remember { vm.dataTracker.getSessionMB() }
+    val totalMB      = totalBytes / (1024f * 1024f)
 
     var showChangeEmail by remember { mutableStateOf(false) }
-    var showChangePwd by remember { mutableStateOf(false) }
+    var showChangePwd   by remember { mutableStateOf(false) }
+    var feedback        by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Paramètres ⚙️", fontWeight = FontWeight.ExtraBold) }) }
+        topBar = {
+            TopAppBar(
+                title          = { Text("Paramètres ⚙️", fontWeight = FontWeight.ExtraBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) }
+                }
+            )
+        }
     ) { pad ->
         Column(
-            modifier = Modifier
+            modifier            = Modifier
                 .fillMaxSize()
                 .padding(pad)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Data usage section
-            SectionTitle("📊 Données consommées")
+            // ── Feedback ──────────────────────────────────────────────────────
+            feedback?.let { msg ->
+                Surface(
+                    color  = MaterialTheme.colorScheme.primaryContainer,
+                    shape  = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier              = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            msg,
+                            style    = MaterialTheme.typography.bodySmall,
+                            color    = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick  = { feedback = null },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close, null,
+                                tint     = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Données ───────────────────────────────────────────────────────
+            SettingsSectionTitle("📊 Données consommées")
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape     = RoundedCornerShape(16.dp),
+                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DataRow("Session en cours", "%.2f Mo".format(sessionMB))
+                Column(
+                    modifier            = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SettingsDataRow("Session en cours", "%.2f Mo".format(sessionMB))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                    DataRow("Total accumulé", "%.2f Mo".format(totalMB))
+                    SettingsDataRow("Total accumulé", "%.2f Mo".format(totalMB))
                 }
             }
 
-            // Notifications section
-            SectionTitle("🔔 Notifications")
+            // ── Notifications ─────────────────────────────────────────────────
+            SettingsSectionTitle("🔔 Notifications")
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape     = RoundedCornerShape(16.dp),
+                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column {
-                    SwitchSetting(
-                        icon = Icons.Default.Chat,
-                        title = "Nouveaux messages",
-                        subtitle = "Alerte quand tu reçois un message",
-                        checked = notifyMessages,
-                        onCheckedChange = { viewModel.setNotifyMessages(it) }
+                    SettingsSwitchRow(
+                        icon     = Icons.Default.Chat,
+                        title    = "Messages privés",
+                        subtitle = "Alerte pour les nouveaux messages",
+                        checked  = notifyMsg
+                    ) { vm.setNotifyMessages(it) }
+
+                    HorizontalDivider(
+                        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        modifier = Modifier.padding(start = 56.dp)
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
-                    SwitchSetting(
-                        icon = Icons.Default.Feed,
-                        title = "Nouveaux posts",
+
+                    SettingsSwitchRow(
+                        icon     = Icons.Default.Feed,
+                        title    = "Nouveaux posts",
                         subtitle = "Alerte quand quelqu'un poste",
-                        checked = notifyPosts,
-                        onCheckedChange = { viewModel.setNotifyPosts(it) }
-                    )
+                        checked  = notifyPost
+                    ) { vm.setNotifyPosts(it) }
                 }
             }
 
-            // Account section
-            SectionTitle("👤 Compte")
+            // ── Compte ────────────────────────────────────────────────────────
+            SettingsSectionTitle("👤 Compte")
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape     = RoundedCornerShape(16.dp),
+                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column {
-                    SettingItem(
-                        icon = Icons.Default.Email,
-                        title = "Changer d'email",
-                        subtitle = viewModel.currentEmail,
-                        onClick = { showChangeEmail = true }
+                    SettingsActionRow(
+                        icon     = Icons.Default.Email,
+                        title    = "Changer l'email",
+                        subtitle = vm.currentEmail
+                    ) { showChangeEmail = true }
+
+                    HorizontalDivider(
+                        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        modifier = Modifier.padding(start = 56.dp)
                     )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
-                    SettingItem(
-                        icon = Icons.Default.Lock,
-                        title = "Changer le mot de passe",
-                        subtitle = "••••••••",
-                        onClick = { showChangePwd = true }
+
+                    SettingsActionRow(
+                        icon     = Icons.Default.Lock,
+                        title    = "Changer le mot de passe",
+                        subtitle = "••••••••"
+                    ) { showChangePwd = true }
+                }
+            }
+
+            // ── À propos ──────────────────────────────────────────────────────
+            SettingsSectionTitle("ℹ️ À propos")
+            Card(
+                shape     = RoundedCornerShape(16.dp),
+                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Askip 🔥", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Version 1.0 — Les rumeurs du campus",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Développé avec ❤️ pour l'ENI, " +
+                                "par 3077,3073 et 3189",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Logout
+            // ── Déconnexion ───────────────────────────────────────────────────
             Spacer(Modifier.height(8.dp))
             Button(
-                onClick = onLogout,
+                onClick  = onLogout,
                 modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                shape    = RoundedCornerShape(14.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
                 Icon(Icons.Default.Logout, null)
                 Spacer(Modifier.width(8.dp))
@@ -152,105 +229,194 @@ fun SettingsScreen(
         }
     }
 
+    // ── Dialog changer email ──────────────────────────────────────────────────
     if (showChangeEmail) {
-        ChangeEmailDialog(
-            onDismiss = { showChangeEmail = false },
-            onSubmit = { newEmail, pwd ->
-                viewModel.updateEmail(newEmail, pwd) { ok, err ->
-                    if (ok) showChangeEmail = false
+        var newEmail by remember { mutableStateOf("") }
+        var pwd      by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showChangeEmail = false },
+            title            = { Text("Changer l'email") },
+            text             = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Un email de confirmation sera envoyé à la nouvelle adresse.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value         = newEmail,
+                        onValueChange = { newEmail = it },
+                        label         = { Text("Nouvel email") },
+                        singleLine    = true,
+                        modifier      = Modifier.fillMaxWidth(),
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value         = pwd,
+                        onValueChange = { pwd = it },
+                        label         = { Text("Mot de passe actuel") },
+                        singleLine    = true,
+                        modifier      = Modifier.fillMaxWidth(),
+                        shape         = RoundedCornerShape(12.dp)
+                    )
                 }
+            },
+            confirmButton = {
+                Button(
+                    onClick  = {
+                        vm.updateEmail(newEmail, pwd) { ok, err ->
+                            showChangeEmail = false
+                            feedback = if (ok) "✅ Email mis à jour ! Vérifie ta boîte mail."
+                            else "❌ $err"
+                        }
+                    },
+                    enabled = newEmail.isNotBlank() && pwd.isNotBlank()
+                ) { Text("Confirmer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChangeEmail = false }) { Text("Annuler") }
             }
         )
     }
+
+    // ── Dialog changer mot de passe ───────────────────────────────────────────
     if (showChangePwd) {
-        ChangePasswordDialog(
-            onDismiss = { showChangePwd = false },
-            onSubmit = { curr, newPwd ->
-                viewModel.updatePassword(curr, newPwd) { ok, err ->
-                    if (ok) showChangePwd = false
+        var current    by remember { mutableStateOf("") }
+        var newPwd     by remember { mutableStateOf("") }
+        var confirmPwd by remember { mutableStateOf("") }
+        val pwdMatch    = newPwd == confirmPwd && newPwd.length >= 6
+
+        AlertDialog(
+            onDismissRequest = { showChangePwd = false },
+            title            = { Text("Nouveau mot de passe") },
+            text             = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value         = current,
+                        onValueChange = { current = it },
+                        label         = { Text("Mot de passe actuel") },
+                        singleLine    = true,
+                        modifier      = Modifier.fillMaxWidth(),
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value          = newPwd,
+                        onValueChange  = { newPwd = it },
+                        label          = { Text("Nouveau mot de passe") },
+                        singleLine     = true,
+                        modifier       = Modifier.fillMaxWidth(),
+                        shape          = RoundedCornerShape(12.dp),
+                        supportingText = { Text("6 caractères minimum") }
+                    )
+                    OutlinedTextField(
+                        value          = confirmPwd,
+                        onValueChange  = { confirmPwd = it },
+                        label          = { Text("Confirmer le mot de passe") },
+                        singleLine     = true,
+                        modifier       = Modifier.fillMaxWidth(),
+                        shape          = RoundedCornerShape(12.dp),
+                        isError        = confirmPwd.isNotBlank() && confirmPwd != newPwd,
+                        supportingText = {
+                            if (confirmPwd.isNotBlank() && confirmPwd != newPwd)
+                                Text(
+                                    "Les mots de passe ne correspondent pas",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                        }
+                    )
                 }
+            },
+            confirmButton = {
+                Button(
+                    onClick  = {
+                        vm.updatePassword(current, newPwd) { ok, err ->
+                            showChangePwd = false
+                            feedback = if (ok) "✅ Mot de passe mis à jour !"
+                            else "❌ $err"
+                        }
+                    },
+                    enabled = current.isNotBlank() && pwdMatch
+                ) { Text("Confirmer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChangePwd = false }) { Text("Annuler") }
             }
         )
     }
 }
 
+// ── Composants ────────────────────────────────────────────────────────────────
+
 @Composable
-fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp))
+fun SettingsSectionTitle(text: String) {
+    Text(
+        text,
+        style      = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color      = MaterialTheme.colorScheme.primary,
+        modifier   = Modifier.padding(start = 4.dp)
+    )
 }
 
 @Composable
-fun DataRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+fun SettingsDataRow(label: String, value: String) {
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(
+            value,
+            style      = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color      = MaterialTheme.colorScheme.primary
+        )
     }
 }
 
 @Composable
-fun SwitchSetting(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onChanged: (Boolean) -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier          = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title,    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall,  color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onChanged)
     }
 }
 
 @Composable
-fun SettingItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+fun SettingsActionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier          = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title,    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall,  color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        IconButton(onClick = onClick) { Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        IconButton(onClick = onClick) {
+            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
-}
-
-@Composable
-fun ChangeEmailDialog(onDismiss: () -> Unit, onSubmit: (String, String) -> Unit) {
-    var newEmail by remember { mutableStateOf("") }
-    var pwd by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Changer d'email") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = newEmail, onValueChange = { newEmail = it }, label = { Text("Nouvel email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = pwd, onValueChange = { pwd = it }, label = { Text("Mot de passe actuel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = { Button(onClick = { onSubmit(newEmail, pwd) }) { Text("Confirmer") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } }
-    )
-}
-
-@Composable
-fun ChangePasswordDialog(onDismiss: () -> Unit, onSubmit: (String, String) -> Unit) {
-    var current by remember { mutableStateOf("") }
-    var newPwd by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Changer le mot de passe") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = current, onValueChange = { current = it }, label = { Text("Mot de passe actuel") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = newPwd, onValueChange = { newPwd = it }, label = { Text("Nouveau mot de passe") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = { Button(onClick = { onSubmit(current, newPwd) }, enabled = current.isNotBlank() && newPwd.length >= 6) { Text("Confirmer") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annuler") } }
-    )
 }

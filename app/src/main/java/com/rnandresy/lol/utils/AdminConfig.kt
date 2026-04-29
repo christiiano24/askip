@@ -1,26 +1,50 @@
 package com.rnandresy.lol.utils
 
-const val ADMIN_UID = "00cGAlooriRpttoV2Jo8zLbTS7v2"
-const val ADMIN_BADGE_NAME = "admin" // nom réservé, personne ne peut créer ce badge
+// ⚠️ Remplace par ton UID Firebase (Authentication → Users)
+const val ADMIN_UID        = "ckCTisQMWKWbnoElnUjO2x4vKxy2"
+const val ADMIN_BADGE_NAME = "admin"   // nom réservé
 
 val ENI_CLASSES = listOf(
-    "CISCO 1ère année",
-    "CISCO 2ème année",
-    "CISCO 3ème année",
-    "Développement 1A",
-    "Développement 1B",
-    "Développement 2A",
-    "Développement 2B",
-    "Réseau & Télécoms 1",
-    "Réseau & Télécoms 2",
-    "Multimédia 1",
-    "Multimédia 2",
-    "Gestion Comptable 1",
-    "Gestion Comptable 2",
-    "Secrétariat Bureautique 1",
-    "Secrétariat Bureautique 2",
-    "Commerce International 1",
-    "Commerce International 2"
+    "IG 1ère année",
+    "IG 2ème année",
+    "IG 3ème année",
+    "GB 1ère année",
+    "GB 2ème année",
+    "GB 3ème année",
+    "SR 1ère année",
+    "SR 2ème année",
+    "SR 3ème année",
+    "GB 4ème année",
+    "GB 5ème année",
+    "SR 4ère année",
+    "SR 5ème année",
+    "IG 4ème année",
+    "IG 5ème année"
 )
 
-fun isAdmin(userId: String): Boolean = userId == ADMIN_UID
+val STORY_COLORS = listOf(
+    "#7C4DFF", "#E91E63", "#2196F3", "#4CAF50",
+    "#FF9800", "#F44336", "#009688", "#9C27B0",
+    "#FF5722", "#607D8B", "#00BCD4", "#8BC34A"
+)
+
+val STORY_EMOJIS = listOf(
+    "💭", "🔥", "😂", "😱", "❤️", "👀", "🎭", "🤫",
+    "💀", "🎉", "😈", "🤔", "😤", "💅", "🙃", "🤯"
+)
+
+val AVATAR_FRAMES = linkedMapOf(
+    "none"    to "Aucun",
+    "fire"    to "🔥 Flammes",
+    "star"    to "⭐ Étoiles",
+    "rainbow" to "🌈 Rainbow",
+    "gold"    to "👑 Or"
+)
+
+val BADGE_COLORS = listOf(
+    "#E91E63", "#9C27B0", "#3F51B5", "#2196F3",
+    "#009688", "#4CAF50", "#FF9800", "#FF5722",
+    "#F44336", "#FFEB3B", "#7C4DFF", "#607D8B"
+)
+
+fun isAdmin(uid: String) = uid == ADMIN_UID

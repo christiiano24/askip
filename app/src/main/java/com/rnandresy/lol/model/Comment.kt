@@ -5,7 +5,6 @@ data class Comment(
     val postId: String = "",
     val userId: String = "",
     val username: String = "",
-    val userPhotoUrl: String = "",
     val content: String = "",
     val timestamp: Long = 0L
 )

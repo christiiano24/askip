@@ -16,84 +16,73 @@ import com.rnandresy.lol.MainActivity
 class NotificationHelper(private val context: Context) {
 
     companion object {
-        const val CHANNEL_MESSAGES = "askip_messages"
-        const val CHANNEL_POSTS = "askip_posts"
-        private var msgNotifId = 1000
-        private var postNotifId = 2000
+        const val CH_MESSAGES = "askip_messages"
+        const val CH_POSTS    = "askip_posts"
+        private var msgId  = 1000
+        private var postId = 2000
     }
 
     fun createChannels() {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        // Canal messages — HIGH priority
         nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_MESSAGES,
-                "Messages privés",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Notifications pour les nouveaux messages"
+            NotificationChannel(CH_MESSAGES, "Messages privés", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Nouveaux messages reçus"
                 enableVibration(true)
-                enableLights(true)
             }
         )
-
-        // Canal posts — DEFAULT priority
         nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_POSTS,
-                "Nouveaux posts",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Notifications pour les nouveaux posts du fil"
+            NotificationChannel(CH_POSTS, "Nouveaux posts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Activité du fil Askip"
             }
         )
     }
 
-    private fun hasPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    private fun hasPermission() =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
+                context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-        } else true
-    }
+        else true
 
-    private fun launchIntent(): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
+    private fun tapIntent() = PendingIntent.getActivity(
+        context, 0,
+        Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        return PendingIntent.getActivity(
-            context, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
-    fun showMessageNotification(senderName: String, content: String) {
+    fun showMessageNotification(sender: String, body: String) {
         if (!hasPermission()) return
-        val notif = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle("💬 $senderName")
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(launchIntent())
-            .build()
-        NotificationManagerCompat.from(context).notify(msgNotifId++, notif)
+        runCatching {
+            NotificationManagerCompat.from(context).notify(msgId++,
+                NotificationCompat.Builder(context, CH_MESSAGES)
+                    .setSmallIcon(android.R.drawable.ic_dialog_email)
+                    .setContentTitle("💬 $sender")
+                    .setContentText(body)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setContentIntent(tapIntent())
+                    .build()
+            )
+        }
     }
 
     fun showPostNotification(username: String, content: String) {
         if (!hasPermission()) return
-        val notif = NotificationCompat.Builder(context, CHANNEL_POSTS)
-            .setSmallIcon(android.R.drawable.ic_menu_share)
-            .setContentTitle("📢 Askip — $username a posté")
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(launchIntent())
-            .build()
-        NotificationManagerCompat.from(context).notify(postNotifId++, notif)
+        runCatching {
+            NotificationManagerCompat.from(context).notify(postId++,
+                NotificationCompat.Builder(context, CH_POSTS)
+                    .setSmallIcon(android.R.drawable.ic_menu_share)
+                    .setContentTitle("🔥 $username a posté")
+                    .setContentText(content)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setContentIntent(tapIntent())
+                    .build()
+            )
+        }
     }
 }
