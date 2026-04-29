@@ -27,7 +27,10 @@ class AskipMessagingService : FirebaseMessagingService() {
 
         when (type) {
             "post" -> helper.showPostNotification(title, body)
-            else -> helper.showMessageNotification(title, body)
+            else -> helper.showMessageNotification(
+                title, body,
+                fromAdmin = TODO()
+            )
         }
     }
 

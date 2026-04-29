@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +39,8 @@ fun EditProfileScreen(
     onSaved: () -> Unit,
     onBack: () -> Unit
 ) {
-    val profile by vm.myProfile.collectAsState()
+    val profile   by vm.myProfile.collectAsState()
+    val isSyncing by vm.isSyncing.collectAsState()
 
     var username   by remember(profile) { mutableStateOf(profile?.username ?: "") }
     var age        by remember(profile) { mutableStateOf(profile?.age?.let { if (it > 0) it.toString() else "" } ?: "") }
@@ -58,32 +60,52 @@ fun EditProfileScreen(
         "Marié(e)", "C'est compliqué", "Préfère ne pas dire"
     )
 
+    val oldUsername = profile?.username ?: ""
+    val usernameChanged = username.trim() != oldUsername && username.isNotBlank()
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title          = { Text("Modifier le profil ✏️") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) }
+                    IconButton(onClick = onBack, enabled = !isSyncing) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
                 },
                 actions = {
-                    FilledIconButton(
-                        onClick = {
-                            val data = mutableMapOf<String, Any?>(
-                                "username"           to username.trim(),
-                                "bio"                to bio.trim(),
-                                "relationshipStatus" to relStatus,
-                                "classeENI"          to classeENI,
-                                "hasBadgeENI"        to classeENI.isNotBlank(),
-                                "themeColor"         to themeColor,
-                                "avatarFrame"        to frame,
-                                "moodEmoji"          to moodEmoji,
-                                "moodText"           to moodText.trim()
+                    if (isSyncing) {
+                        Row(
+                            modifier          = Modifier.padding(end = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text(
+                                "Sync…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
                             )
-                            age.toIntOrNull()?.let { data["age"] = it }
-                            vm.updateProfile(data, onSaved)
-                        },
-                        enabled = username.isNotBlank()
-                    ) { Icon(Icons.Default.Save, null) }
+                        }
+                    } else {
+                        FilledIconButton(
+                            onClick = {
+                                val data = mutableMapOf<String, Any?>(
+                                    "username"           to username.trim(),
+                                    "bio"                to bio.trim(),
+                                    "relationshipStatus" to relStatus,
+                                    "classeENI"          to classeENI,
+                                    "hasBadgeENI"        to classeENI.isNotBlank(),
+                                    "themeColor"         to themeColor,
+                                    "avatarFrame"        to frame,
+                                    "moodEmoji"          to moodEmoji,
+                                    "moodText"           to moodText.trim()
+                                )
+                                age.toIntOrNull()?.let { data["age"] = it }
+                                vm.updateProfile(data, onSaved)
+                            },
+                            enabled = username.isNotBlank()
+                        ) { Icon(Icons.Default.Save, null) }
+                    }
                 }
             )
         }
@@ -95,14 +117,38 @@ fun EditProfileScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // ── Info synchro pseudo ───────────────────────────────────────────
+            if (usernameChanged) {
+                Surface(
+                    color  = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape  = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier          = Modifier.fillMaxWidth().padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Sync, null,
+                            tint     = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Le nouveau pseudo sera synchronisé sur tous tes anciens posts, commentaires et messages.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+
             // ── Humeur ───────────────────────────────────────────────────────
             SectionLabel("Humeur du jour 😊")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(STORY_EMOJIS.take(12)) { emoji ->
                     Surface(
                         onClick = { moodEmoji = if (moodEmoji == emoji) "" else emoji },
-                        color   = if (moodEmoji == emoji)
-                            MaterialTheme.colorScheme.primaryContainer
+                        color   = if (moodEmoji == emoji) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
                         shape   = RoundedCornerShape(10.dp)
                     ) {
@@ -112,12 +158,12 @@ fun EditProfileScreen(
             }
             if (moodEmoji.isNotBlank()) {
                 OutlinedTextField(
-                    value         = moodText,
-                    onValueChange = { if (it.length <= 50) moodText = it },
-                    label         = { Text("Texte humeur (optionnel)") },
-                    singleLine    = true,
-                    modifier      = Modifier.fillMaxWidth(),
-                    shape         = RoundedCornerShape(12.dp),
+                    value           = moodText,
+                    onValueChange   = { if (it.length <= 50) moodText = it },
+                    label           = { Text("Texte humeur (optionnel)") },
+                    singleLine      = true,
+                    modifier        = Modifier.fillMaxWidth(),
+                    shape           = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next)
                 )
             }
@@ -130,15 +176,8 @@ fun EditProfileScreen(
                         Color(android.graphics.Color.parseColor(hex))
                     }.getOrElse { Color.Gray }
                     Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(c)
-                            .then(
-                                if (themeColor == hex)
-                                    Modifier.border(3.dp, Color.White, CircleShape)
-                                else Modifier
-                            )
+                        modifier = Modifier.size(34.dp).clip(CircleShape).background(c)
+                            .then(if (themeColor == hex) Modifier.border(3.dp, Color.White, CircleShape) else Modifier)
                             .clickable { themeColor = hex }
                     )
                 }
@@ -157,10 +196,9 @@ fun EditProfileScreen(
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-
-            // ── Infos personnelles ────────────────────────────────────────────
             SectionLabel("Informations 👤")
 
+            // Pseudo
             OutlinedTextField(
                 value           = username,
                 onValueChange   = { username = it },
@@ -175,6 +213,7 @@ fun EditProfileScreen(
                 }
             )
 
+            // Âge
             OutlinedTextField(
                 value           = age,
                 onValueChange   = { if (it.length <= 3) age = it.filter { c -> c.isDigit() } },
@@ -185,6 +224,7 @@ fun EditProfileScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
             )
 
+            // Bio
             OutlinedTextField(
                 value         = bio,
                 onValueChange = { if (it.length <= 150) bio = it },
@@ -194,61 +234,35 @@ fun EditProfileScreen(
                 maxLines      = 4
             )
 
-            // ── Statut amoureux ───────────────────────────────────────────────
-            ExposedDropdownMenuBox(
-                expanded         = statutExpanded,
-                onExpandedChange = { statutExpanded = !statutExpanded }
-            ) {
+            // Statut amoureux
+            ExposedDropdownMenuBox(expanded = statutExpanded, onExpandedChange = { statutExpanded = !statutExpanded }) {
                 OutlinedTextField(
-                    value         = relStatus,
-                    onValueChange = {},
-                    readOnly      = true,
+                    value         = relStatus, onValueChange = {}, readOnly = true,
                     label         = { Text("Statut amoureux 💑") },
-                    trailingIcon  = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = statutExpanded)
-                    },
-                    modifier      = Modifier.menuAnchor().fillMaxWidth(),
-                    shape         = RoundedCornerShape(12.dp)
+                    trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = statutExpanded) },
+                    modifier      = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp)
                 )
-                ExposedDropdownMenu(
-                    expanded         = statutExpanded,
-                    onDismissRequest = { statutExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text    = { Text("— Aucun —") },
-                        onClick = { relStatus = ""; statutExpanded = false }
-                    )
+                ExposedDropdownMenu(expanded = statutExpanded, onDismissRequest = { statutExpanded = false }) {
+                    DropdownMenuItem(text = { Text("— Aucun —") }, onClick = { relStatus = ""; statutExpanded = false })
                     relStatuts.forEach { s ->
                         DropdownMenuItem(
-                            text = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(s)
-                                    if (s == relStatus) {
-                                        Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            },
+                            text = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(s)
+                                if (s == relStatus) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }},
                             onClick = { relStatus = s; statutExpanded = false }
                         )
                     }
                 }
             }
 
-            // ── Classe ENI ────────────────────────────────────────────────────
-            ExposedDropdownMenuBox(
-                expanded         = eniExpanded,
-                onExpandedChange = { eniExpanded = !eniExpanded }
-            ) {
+            // Classe ENI
+            ExposedDropdownMenuBox(expanded = eniExpanded, onExpandedChange = { eniExpanded = !eniExpanded }) {
                 OutlinedTextField(
-                    value          = classeENI,
-                    onValueChange  = {},
-                    readOnly       = true,
+                    value          = classeENI, onValueChange = {}, readOnly = true,
                     label          = { Text("Classe ENI 🎓") },
-                    trailingIcon   = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = eniExpanded)
-                    },
-                    modifier       = Modifier.menuAnchor().fillMaxWidth(),
-                    shape          = RoundedCornerShape(12.dp),
+                    trailingIcon   = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = eniExpanded) },
+                    modifier       = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                     supportingText = {
                         if (classeENI.isNotBlank())
                             Text("✅ Badge ENI attribué !", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
@@ -256,24 +270,14 @@ fun EditProfileScreen(
                             Text("Sélectionne ta classe pour le badge ENI 🎓", style = MaterialTheme.typography.labelSmall)
                     }
                 )
-                ExposedDropdownMenu(
-                    expanded         = eniExpanded,
-                    onDismissRequest = { eniExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text    = { Text("— Aucune —") },
-                        onClick = { classeENI = ""; eniExpanded = false }
-                    )
+                ExposedDropdownMenu(expanded = eniExpanded, onDismissRequest = { eniExpanded = false }) {
+                    DropdownMenuItem(text = { Text("— Aucune —") }, onClick = { classeENI = ""; eniExpanded = false })
                     ENI_CLASSES.forEach { cl ->
                         DropdownMenuItem(
-                            text = {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(cl)
-                                    if (cl == classeENI) {
-                                        Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            },
+                            text = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(cl)
+                                if (cl == classeENI) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }},
                             onClick = { classeENI = cl; eniExpanded = false }
                         )
                     }

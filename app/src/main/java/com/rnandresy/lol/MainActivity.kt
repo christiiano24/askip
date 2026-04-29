@@ -23,6 +23,7 @@ import com.rnandresy.lol.ui.chat.ChatScreen
 import com.rnandresy.lol.ui.confession.ConfessionsScreen
 import com.rnandresy.lol.ui.feed.FeedScreen
 import com.rnandresy.lol.ui.members.MembersScreen
+import com.rnandresy.lol.ui.notifications.NotificationsScreen
 import com.rnandresy.lol.ui.post.CommentsScreen
 import com.rnandresy.lol.ui.post.CreatePostScreen
 import com.rnandresy.lol.ui.post.CreateStoryScreen
@@ -50,14 +51,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AskipApp() {
-    val nav          = rememberNavController()
+    val nav = rememberNavController()
     val vm: AskipViewModel = viewModel()
     val isLoggedIn  by vm.isLoggedIn.collectAsState()
     val backStack   by nav.currentBackStackEntryAsState()
     val route        = backStack?.destination?.route
     val startDest    = remember { if (vm.isLoggedIn.value) "feed" else "login" }
+    val unreadNotifs by vm.unreadNotifCount.collectAsState()
 
-    val bottomRoutes = setOf("feed", "confessions", "chatlist", "myprofile")
+    val bottomRoutes = setOf("feed", "confessions", "notifications", "chatlist", "myprofile")
     val showNav      = isLoggedIn && route in bottomRoutes
 
     val goProfile: (String) -> Unit = { uid ->
@@ -69,24 +71,47 @@ fun AskipApp() {
         bottomBar = {
             AnimatedVisibility(visible = showNav) {
                 NavigationBar {
+                    // Accueil
                     NavigationBarItem(
                         selected = route == "feed",
                         onClick  = { nav.navigate("feed") { launchSingleTop = true; restoreState = true } },
                         icon     = { Icon(Icons.Default.Home, null) },
                         label    = { Text("Askip") }
                     )
+                    // Confessions
                     NavigationBarItem(
                         selected = route == "confessions",
                         onClick  = { nav.navigate("confessions") { launchSingleTop = true; restoreState = true } },
                         icon     = { Icon(Icons.Default.TheaterComedy, null) },
                         label    = { Text("Confessions") }
                     )
+                    // Notifications (avec badge)
+                    NavigationBarItem(
+                        selected = route == "notifications",
+                        onClick  = { nav.navigate("notifications") { launchSingleTop = true; restoreState = true } },
+                        icon     = {
+                            BadgedBox(
+                                badge = {
+                                    if (unreadNotifs > 0) {
+                                        Badge {
+                                            Text(if (unreadNotifs > 99) "99+" else "$unreadNotifs")
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Notifications, null)
+                            }
+                        },
+                        label = { Text("Notifs") }
+                    )
+                    // Messages
                     NavigationBarItem(
                         selected = route == "chatlist",
                         onClick  = { nav.navigate("chatlist") { launchSingleTop = true; restoreState = true } },
                         icon     = { Icon(Icons.Default.Chat, null) },
                         label    = { Text("Messages") }
                     )
+                    // Profil
                     NavigationBarItem(
                         selected = route == "myprofile",
                         onClick  = { nav.navigate("myprofile") { launchSingleTop = true; restoreState = true } },
@@ -131,8 +156,14 @@ fun AskipApp() {
                 )
             }
             composable("confessions") {
-                ConfessionsScreen(vm,
-                    onOpenComments = { nav.navigate("comments/$it") }
+                ConfessionsScreen(vm, onOpenComments = { nav.navigate("comments/$it") })
+            }
+            composable("notifications") {
+                NotificationsScreen(
+                    vm                 = vm,
+                    onOpenPost         = { postId -> nav.navigate("comments/$postId") },
+                    onOpenConversation = { convId -> nav.navigate("chat/$convId") },
+                    onOpenProfile      = goProfile
                 )
             }
             composable("chatlist") {
@@ -152,24 +183,15 @@ fun AskipApp() {
                 )
             }
 
-            // ── Sub ───────────────────────────────────────────────────────────
+            // ── Sub-screens ───────────────────────────────────────────────────
             composable("newpost") {
-                CreatePostScreen(vm,
-                    onDone = { nav.popBackStack() },
-                    onBack = { nav.popBackStack() }
-                )
+                CreatePostScreen(vm, onDone = { nav.popBackStack() }, onBack = { nav.popBackStack() })
             }
             composable("newstory") {
-                CreateStoryScreen(vm,
-                    onDone = { nav.popBackStack() },
-                    onBack = { nav.popBackStack() }
-                )
+                CreateStoryScreen(vm, onDone = { nav.popBackStack() }, onBack = { nav.popBackStack() })
             }
             composable("editprofile") {
-                EditProfileScreen(vm,
-                    onSaved = { nav.popBackStack() },
-                    onBack  = { nav.popBackStack() }
-                )
+                EditProfileScreen(vm, onSaved = { nav.popBackStack() }, onBack = { nav.popBackStack() })
             }
             composable("settings") {
                 SettingsScreen(vm,
@@ -181,10 +203,7 @@ fun AskipApp() {
                 )
             }
             composable("members") {
-                MembersScreen(vm,
-                    onOpenProfile = goProfile,
-                    onBack        = { nav.popBackStack() }
-                )
+                MembersScreen(vm, onOpenProfile = goProfile, onBack = { nav.popBackStack() })
             }
             composable(
                 route     = "comments/{postId}",

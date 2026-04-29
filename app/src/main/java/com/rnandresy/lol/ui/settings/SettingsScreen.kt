@@ -14,7 +14,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -47,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -59,11 +62,12 @@ fun SettingsScreen(
     onLogout: () -> Unit,
     onBack: () -> Unit
 ) {
-    val notifyMsg   by vm.notifyMessages.collectAsState()
-    val notifyPost  by vm.notifyPosts.collectAsState()
-    val totalBytes  by vm.totalBytesStored.collectAsState()
-    val sessionMB    = remember { vm.dataTracker.getSessionMB() }
-    val totalMB      = totalBytes / (1024f * 1024f)
+    val notifyMsg      by vm.notifyMessages.collectAsState()
+    val notifyPost     by vm.notifyPosts.collectAsState()
+    val notifyMentions by vm.notifyMentions.collectAsState()
+    val totalBytes     by vm.totalBytesStored.collectAsState()
+    val sessionMB       = remember { vm.dataTracker.getSessionMB() }
+    val totalMB         = totalBytes / (1024f * 1024f)
 
     var showChangeEmail by remember { mutableStateOf(false) }
     var showChangePwd   by remember { mutableStateOf(false) }
@@ -89,46 +93,30 @@ fun SettingsScreen(
         ) {
             // ── Feedback ──────────────────────────────────────────────────────
             feedback?.let { msg ->
-                Surface(
-                    color  = MaterialTheme.colorScheme.primaryContainer,
-                    shape  = RoundedCornerShape(10.dp)
-                ) {
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(10.dp)) {
                     Row(
                         modifier              = Modifier.fillMaxWidth().padding(12.dp),
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            msg,
-                            style    = MaterialTheme.typography.bodySmall,
-                            color    = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick  = { feedback = null },
-                            modifier = Modifier.size(20.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close, null,
-                                tint     = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        Text(msg, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { feedback = null }, modifier = Modifier.size(20.dp)) {
+                            Icon(Icons.Default.Close, null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
             }
 
-            // ── Données ───────────────────────────────────────────────────────
+            // ── Données consommées ────────────────────────────────────────────
             SettingsSectionTitle("📊 Données consommées")
             Card(
                 shape     = RoundedCornerShape(16.dp),
                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(2.dp)
             ) {
-                Column(
-                    modifier            = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SettingsDataRow("Session en cours", "%.2f Mo".format(sessionMB))
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                     SettingsDataRow("Total accumulé", "%.2f Mo".format(totalMB))
@@ -137,30 +125,73 @@ fun SettingsScreen(
 
             // ── Notifications ─────────────────────────────────────────────────
             SettingsSectionTitle("🔔 Notifications")
+
+            // Info admin
+            Surface(
+                color  = Color(0xFFFFD700).copy(alpha = 0.08f),
+                shape  = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier          = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("👑", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Les posts, messages et mentions de l'Admin sont toujours activés et ne peuvent pas être désactivés.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFB8860B)
+                    )
+                }
+            }
+
             Card(
                 shape     = RoundedCornerShape(16.dp),
                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(2.dp)
             ) {
                 Column {
+                    // Messages non-admin
                     SettingsSwitchRow(
                         icon     = Icons.Default.Chat,
                         title    = "Messages privés",
-                        subtitle = "Alerte pour les nouveaux messages",
-                        checked  = notifyMsg
+                        subtitle = "Alertes pour les messages des autres membres",
+                        checked  = notifyMsg,
+                        enabled  = true
                     ) { vm.setNotifyMessages(it) }
 
-                    HorizontalDivider(
-                        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                        modifier = Modifier.padding(start = 56.dp)
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
 
+                    // Mentions non-admin
+                    SettingsSwitchRow(
+                        icon     = Icons.Default.AlternateEmail,
+                        title    = "Mentions",
+                        subtitle = "Alertes quand quelqu'un te mentionne (@toi)",
+                        checked  = notifyMentions,
+                        enabled  = true
+                    ) { vm.setNotifyMentions(it) }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
+
+                    // Nouveaux posts (autres users)
                     SettingsSwitchRow(
                         icon     = Icons.Default.Feed,
                         title    = "Nouveaux posts",
-                        subtitle = "Alerte quand quelqu'un poste",
-                        checked  = notifyPost
+                        subtitle = "Alertes quand d'autres membres postent",
+                        checked  = notifyPost,
+                        enabled  = true
                     ) { vm.setNotifyPosts(it) }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
+
+                    // Posts admin (toujours activé — non modifiable)
+                    SettingsSwitchRow(
+                        icon     = Icons.Default.Campaign,
+                        title    = "Annonces de l'Admin 👑",
+                        subtitle = "Toujours activé — obligatoire",
+                        checked  = true,
+                        enabled  = false
+                    ) { /* non modifiable */ }
                 }
             }
 
@@ -177,12 +208,7 @@ fun SettingsScreen(
                         title    = "Changer l'email",
                         subtitle = vm.currentEmail
                     ) { showChangeEmail = true }
-
-                    HorizontalDivider(
-                        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                        modifier = Modifier.padding(start = 56.dp)
-                    )
-
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(start = 56.dp))
                     SettingsActionRow(
                         icon     = Icons.Default.Lock,
                         title    = "Changer le mot de passe",
@@ -200,17 +226,8 @@ fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Askip 🔥", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Version 1.0 — Les rumeurs du campus",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Développé avec ❤️ pour l'ENI, " +
-                                "par 3077,3073 et 3189",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text("Version 1.0 — Les rumeurs du campus", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Développé avec ❤️ pour l'ENI, par 3077, 3073, 3189", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -233,33 +250,19 @@ fun SettingsScreen(
     if (showChangeEmail) {
         var newEmail by remember { mutableStateOf("") }
         var pwd      by remember { mutableStateOf("") }
-
         AlertDialog(
             onDismissRequest = { showChangeEmail = false },
             title            = { Text("Changer l'email") },
             text             = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Un email de confirmation sera envoyé à la nouvelle adresse.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value         = newEmail,
-                        onValueChange = { newEmail = it },
-                        label         = { Text("Nouvel email") },
-                        singleLine    = true,
-                        modifier      = Modifier.fillMaxWidth(),
-                        shape         = RoundedCornerShape(12.dp)
-                    )
-                    OutlinedTextField(
-                        value         = pwd,
-                        onValueChange = { pwd = it },
-                        label         = { Text("Mot de passe actuel") },
-                        singleLine    = true,
-                        modifier      = Modifier.fillMaxWidth(),
-                        shape         = RoundedCornerShape(12.dp)
-                    )
+                    Text("Un email de confirmation sera envoyé à la nouvelle adresse.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(value = newEmail, onValueChange = { newEmail = it },
+                        label = { Text("Nouvel email") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = pwd, onValueChange = { pwd = it },
+                        label = { Text("Mot de passe actuel") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                 }
             },
             confirmButton = {
@@ -267,16 +270,13 @@ fun SettingsScreen(
                     onClick  = {
                         vm.updateEmail(newEmail, pwd) { ok, err ->
                             showChangeEmail = false
-                            feedback = if (ok) "✅ Email mis à jour ! Vérifie ta boîte mail."
-                            else "❌ $err"
+                            feedback = if (ok) "✅ Email mis à jour !" else "❌ $err"
                         }
                     },
                     enabled = newEmail.isNotBlank() && pwd.isNotBlank()
                 ) { Text("Confirmer") }
             },
-            dismissButton = {
-                TextButton(onClick = { showChangeEmail = false }) { Text("Annuler") }
-            }
+            dismissButton = { TextButton(onClick = { showChangeEmail = false }) { Text("Annuler") } }
         )
     }
 
@@ -286,45 +286,26 @@ fun SettingsScreen(
         var newPwd     by remember { mutableStateOf("") }
         var confirmPwd by remember { mutableStateOf("") }
         val pwdMatch    = newPwd == confirmPwd && newPwd.length >= 6
-
         AlertDialog(
             onDismissRequest = { showChangePwd = false },
             title            = { Text("Nouveau mot de passe") },
             text             = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value         = current,
-                        onValueChange = { current = it },
-                        label         = { Text("Mot de passe actuel") },
-                        singleLine    = true,
-                        modifier      = Modifier.fillMaxWidth(),
-                        shape         = RoundedCornerShape(12.dp)
-                    )
-                    OutlinedTextField(
-                        value          = newPwd,
-                        onValueChange  = { newPwd = it },
-                        label          = { Text("Nouveau mot de passe") },
-                        singleLine     = true,
-                        modifier       = Modifier.fillMaxWidth(),
-                        shape          = RoundedCornerShape(12.dp),
-                        supportingText = { Text("6 caractères minimum") }
-                    )
-                    OutlinedTextField(
-                        value          = confirmPwd,
-                        onValueChange  = { confirmPwd = it },
-                        label          = { Text("Confirmer le mot de passe") },
-                        singleLine     = true,
-                        modifier       = Modifier.fillMaxWidth(),
-                        shape          = RoundedCornerShape(12.dp),
-                        isError        = confirmPwd.isNotBlank() && confirmPwd != newPwd,
+                    OutlinedTextField(value = current, onValueChange = { current = it },
+                        label = { Text("Mot de passe actuel") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = newPwd, onValueChange = { newPwd = it },
+                        label = { Text("Nouveau mot de passe") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        supportingText = { Text("6 caractères minimum") })
+                    OutlinedTextField(value = confirmPwd, onValueChange = { confirmPwd = it },
+                        label = { Text("Confirmer") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+                        isError = confirmPwd.isNotBlank() && confirmPwd != newPwd,
                         supportingText = {
                             if (confirmPwd.isNotBlank() && confirmPwd != newPwd)
-                                Text(
-                                    "Les mots de passe ne correspondent pas",
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                        }
-                    )
+                                Text("Ne correspondent pas", color = MaterialTheme.colorScheme.error)
+                        })
                 }
             },
             confirmButton = {
@@ -332,16 +313,13 @@ fun SettingsScreen(
                     onClick  = {
                         vm.updatePassword(current, newPwd) { ok, err ->
                             showChangePwd = false
-                            feedback = if (ok) "✅ Mot de passe mis à jour !"
-                            else "❌ $err"
+                            feedback = if (ok) "✅ Mot de passe mis à jour !" else "❌ $err"
                         }
                     },
                     enabled = current.isNotBlank() && pwdMatch
                 ) { Text("Confirmer") }
             },
-            dismissButton = {
-                TextButton(onClick = { showChangePwd = false }) { Text("Annuler") }
-            }
+            dismissButton = { TextButton(onClick = { showChangePwd = false }) { Text("Annuler") } }
         )
     }
 }
@@ -350,61 +328,43 @@ fun SettingsScreen(
 
 @Composable
 fun SettingsSectionTitle(text: String) {
-    Text(
-        text,
-        style      = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color      = MaterialTheme.colorScheme.primary,
-        modifier   = Modifier.padding(start = 4.dp)
-    )
+    Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 4.dp))
 }
 
 @Composable
 fun SettingsDataRow(label: String, value: String) {
-    Row(
-        modifier              = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
-    ) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            value,
-            style      = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            color      = MaterialTheme.colorScheme.primary
-        )
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
     }
 }
 
 @Composable
 fun SettingsSwitchRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
+    icon: ImageVector, title: String, subtitle: String,
+    checked: Boolean, enabled: Boolean = true,
     onChanged: (Boolean) -> Unit
 ) {
     Row(
         modifier          = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+        Icon(icon, null,
+            tint     = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title,    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall,  color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onChanged)
+        Switch(checked = checked, onCheckedChange = onChanged, enabled = enabled)
     }
 }
 
 @Composable
-fun SettingsActionRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
+fun SettingsActionRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
     Row(
         modifier          = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -412,8 +372,8 @@ fun SettingsActionRow(
         Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title,    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall,  color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         IconButton(onClick = onClick) {
             Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

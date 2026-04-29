@@ -17,27 +17,22 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val settings = SettingsRepository(application)
     val dataTracker      = DataUsageTracker()
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+    // ── States ────────────────────────────────────────────────────────────────
 
     val isLoggedIn    = MutableStateFlow(repo.isLoggedIn())
     val currentUserId get() = repo.currentUserId()
     val currentEmail  get() = repo.currentEmail()
 
-    // ── Profiles ──────────────────────────────────────────────────────────────
-
-    private val _myProfile     = MutableStateFlow<UserProfile?>(null)
+    private val _myProfile      = MutableStateFlow<UserProfile?>(null)
     val myProfile: StateFlow<UserProfile?> = _myProfile
 
-    private val _viewedProfile = MutableStateFlow<UserProfile?>(null)
+    private val _viewedProfile  = MutableStateFlow<UserProfile?>(null)
     val viewedProfile: StateFlow<UserProfile?> = _viewedProfile
 
-    private val _allProfiles   = MutableStateFlow<List<UserProfile>>(emptyList())
+    private val _allProfiles    = MutableStateFlow<List<UserProfile>>(emptyList())
     val allProfiles: StateFlow<List<UserProfile>> = _allProfiles
 
-    // ── Posts & Stories ───────────────────────────────────────────────────────
-
     private val _allPosts = MutableStateFlow<List<Post>>(emptyList())
-
     val feedPosts: StateFlow<List<Post>> = _allPosts
         .map { posts ->
             posts.filter { it.postType != "confession" }
@@ -55,12 +50,8 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
-    // ── Comments ──────────────────────────────────────────────────────────────
-
     private val _comments = MutableStateFlow<List<Comment>>(emptyList())
     val comments: StateFlow<List<Comment>> = _comments
-
-    // ── Conversations ─────────────────────────────────────────────────────────
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations
@@ -68,15 +59,11 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages
 
-    // ── Badges ────────────────────────────────────────────────────────────────
-
     private val _allBadges = MutableStateFlow<List<Badge>>(emptyList())
     val allBadges: StateFlow<List<Badge>> = _allBadges
 
     private val _myBadges = MutableStateFlow<List<Badge>>(emptyList())
     val myBadges: StateFlow<List<Badge>> = _myBadges
-
-    // ── Achievements ──────────────────────────────────────────────────────────
 
     private val _myAchievements     = MutableStateFlow<List<Achievement>>(emptyList())
     val myAchievements: StateFlow<List<Achievement>> = _myAchievements
@@ -84,25 +71,35 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     private val _viewedAchievements = MutableStateFlow<List<Achievement>>(emptyList())
     val viewedAchievements: StateFlow<List<Achievement>> = _viewedAchievements
 
+    private val _notifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val notifications: StateFlow<List<AppNotification>> = _notifications
+
+    val unreadNotifCount: StateFlow<Int> = _notifications
+        .map { it.count { n -> !n.isRead } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
     // ── Settings ──────────────────────────────────────────────────────────────
 
     val notifyMessages   = settings.notifyMessages.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val notifyPosts      = settings.notifyPosts.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val notifyMentions   = settings.notifyMentions.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val totalBytesStored = settings.totalBytes.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
-
-    // ── UI ────────────────────────────────────────────────────────────────────
 
     val error   = MutableStateFlow<String?>(null)
     val loading = MutableStateFlow(false)
 
-    private var postsJob:   Job? = null
-    private var storiesJob: Job? = null
-    private var convJob:    Job? = null
-    private var msgJob:     Job? = null
-    private var commentJob: Job? = null
-    private var badgesJob:  Job? = null
-    private var profileJob: Job? = null
+    // État de synchronisation pseudo
+    val isSyncing = MutableStateFlow(false)
+
+    private var postsJob:    Job? = null
+    private var storiesJob:  Job? = null
+    private var convJob:     Job? = null
+    private var msgJob:      Job? = null
+    private var commentJob:  Job? = null
+    private var badgesJob:   Job? = null
+    private var profileJob:  Job? = null
     private var profilesJob: Job? = null
+    private var notifJob:    Job? = null
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -121,11 +118,12 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         listenStories()
         listenConversations()
         listenAllBadges()
+        listenNotifications()
     }
 
     private fun stopAll() {
-        listOf(postsJob, storiesJob, convJob, msgJob, commentJob, badgesJob, profileJob, profilesJob)
-            .forEach { it?.cancel() }
+        listOf(postsJob, storiesJob, convJob, msgJob, commentJob,
+            badgesJob, profileJob, profilesJob, notifJob).forEach { it?.cancel() }
         _allPosts.value = emptyList()
         _stories.value  = emptyList()
         _conversations.value = emptyList()
@@ -134,9 +132,10 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         _allProfiles.value = emptyList()
         _allBadges.value = emptyList()
         _myBadges.value  = emptyList()
+        _notifications.value = emptyList()
     }
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+    // ── AUTH ──────────────────────────────────────────────────────────────────
 
     fun login(email: String, password: String) = viewModelScope.launch {
         loading.value = true
@@ -160,32 +159,32 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { repo.logout() }
     }
 
-    fun updateEmail(newEmail: String, pwd: String, onDone: (Boolean, String?) -> Unit) =
+    fun updateEmail(e: String, p: String, onDone: (Boolean, String?) -> Unit) =
         viewModelScope.launch {
-            runCatching { repo.updateEmail(newEmail, pwd) }
+            runCatching { repo.updateEmail(e, p) }
                 .onSuccess { onDone(true, null) }
                 .onFailure { onDone(false, it.message) }
         }
 
-    fun updatePassword(current: String, newPwd: String, onDone: (Boolean, String?) -> Unit) =
+    fun updatePassword(c: String, n: String, onDone: (Boolean, String?) -> Unit) =
         viewModelScope.launch {
-            runCatching { repo.updatePassword(current, newPwd) }
+            runCatching { repo.updatePassword(c, n) }
                 .onSuccess { onDone(true, null) }
                 .onFailure { onDone(false, it.message) }
         }
 
     private fun friendly(msg: String?) = when {
         msg == null -> "Erreur inconnue"
-        "password" in msg.lowercase()          -> "Mot de passe incorrect"
-        "already" in msg.lowercase()           -> "Email déjà utilisé"
-        "no user" in msg.lowercase()           -> "Aucun compte trouvé"
-        "network" in msg.lowercase()           -> "Vérifiez votre connexion"
-        "invalid" in msg.lowercase()           -> "Email ou mot de passe invalide"
-        "weak" in msg.lowercase()              -> "Mot de passe trop faible (6 min)"
+        "password" in msg.lowercase() -> "Mot de passe incorrect"
+        "already" in msg.lowercase()  -> "Email déjà utilisé"
+        "no user" in msg.lowercase()  -> "Aucun compte trouvé"
+        "network" in msg.lowercase()  -> "Vérifiez votre connexion"
+        "invalid" in msg.lowercase()  -> "Email ou mot de passe invalide"
+        "weak" in msg.lowercase()     -> "Mot de passe trop faible (6 min)"
         else -> msg
     }
 
-    // ── Profile ───────────────────────────────────────────────────────────────
+    // ── PROFILES ─────────────────────────────────────────────────────────────
 
     private fun listenMyProfile() {
         profileJob?.cancel()
@@ -212,19 +211,36 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadProfile(uid: String) = viewModelScope.launch {
-        _viewedProfile.value  = repo.getProfile(uid)
+        _viewedProfile.value      = repo.getProfile(uid)
         _viewedAchievements.value = repo.getAchievements(uid)
     }
 
+    /**
+     * Met à jour le profil ET synchronise le pseudo partout si changé.
+     */
     fun updateProfile(data: Map<String, Any?>, onDone: (() -> Unit)? = null) =
         viewModelScope.launch {
             runCatching {
+                val oldUsername = _myProfile.value?.username ?: ""
+                val newUsername = (data["username"] as? String)?.trim() ?: ""
+
                 repo.updateProfile(currentUserId, data)
+
+                // Sync pseudo si modifié
+                if (newUsername.isNotBlank() && newUsername != oldUsername) {
+                    isSyncing.value = true
+                    repo.syncUsername(currentUserId, newUsername)
+                    isSyncing.value = false
+                }
+
                 onDone?.invoke()
-            }.onFailure { error.value = it.message }
+            }.onFailure {
+                isSyncing.value = false
+                error.value = it.message
+            }
         }
 
-    // ── Achievement engine ────────────────────────────────────────────────────
+    // ── ACHIEVEMENTS ──────────────────────────────────────────────────────────
 
     private fun checkAchievements(profile: UserProfile) = viewModelScope.launch {
         val uid      = currentUserId
@@ -235,26 +251,26 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                 _myAchievements.value = repo.getAchievements(uid)
             }
         }
-        if (profile.postsCount >= 1)                   unlock("first_post")
-        if (profile.postsCount >= 10)                  unlock("ten_posts")
-        if (profile.postsCount >= 25)                  unlock("twenty_five_p")
-        if (profile.totalReactionsReceived >= 1)        unlock("first_react")
-        if (profile.totalReactionsReceived >= 50)       unlock("popular")
-        if (profile.totalReactionsReceived >= 200)      unlock("viral")
-        if (profile.commentsCount >= 20)               unlock("commentator")
-        if (profile.confessionsCount >= 1)             unlock("confessor")
-        if (profile.confessionsCount >= 5)             unlock("dark_confessor")
-        if (profile.pollsCount >= 3)                   unlock("poll_creator")
-        if (profile.pollsCount >= 10)                  unlock("poll_master")
-        if (profile.convsStarted >= 5)                 unlock("social")
-        if (profile.storiesCount >= 5)                 unlock("storyteller")
-        if (profile.streak >= 3)                       unlock("streak_3")
-        if (profile.streak >= 7)                       unlock("streak_7")
-        if (profile.hasBadgeENI)                       unlock("eni_pride")
-        if (profile.badgeIds.isNotEmpty())             unlock("badge_maker")
+        if (profile.postsCount >= 1)                unlock("first_post")
+        if (profile.postsCount >= 10)               unlock("ten_posts")
+        if (profile.postsCount >= 25)               unlock("twenty_five_p")
+        if (profile.totalReactionsReceived >= 1)     unlock("first_react")
+        if (profile.totalReactionsReceived >= 50)    unlock("popular")
+        if (profile.totalReactionsReceived >= 200)   unlock("viral")
+        if (profile.commentsCount >= 20)            unlock("commentator")
+        if (profile.confessionsCount >= 1)          unlock("confessor")
+        if (profile.confessionsCount >= 5)          unlock("dark_confessor")
+        if (profile.pollsCount >= 3)                unlock("poll_creator")
+        if (profile.pollsCount >= 10)               unlock("poll_master")
+        if (profile.convsStarted >= 5)              unlock("social")
+        if (profile.storiesCount >= 5)              unlock("storyteller")
+        if (profile.streak >= 3)                    unlock("streak_3")
+        if (profile.streak >= 7)                    unlock("streak_7")
+        if (profile.hasBadgeENI)                    unlock("eni_pride")
+        if (profile.badgeIds.isNotEmpty())          unlock("badge_maker")
     }
 
-    // ── Badges ────────────────────────────────────────────────────────────────
+    // ── BADGES ────────────────────────────────────────────────────────────────
 
     private fun listenAllBadges() {
         badgesJob?.cancel()
@@ -271,47 +287,38 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         displayName: String, colorHex: String,
         onSuccess: () -> Unit, onError: (String) -> Unit
     ) {
-        val profile    = _myProfile.value ?: return
+        val profile     = _myProfile.value ?: return
         val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
         viewModelScope.launch {
             try {
                 val trimmed = displayName.trim()
-                if (trimmed.isBlank())
-                    return@launch onError("Le nom ne peut pas être vide")
-                if (trimmed.lowercase() == ADMIN_BADGE_NAME)
-                    return@launch onError("Ce nom est réservé")
+                if (trimmed.isBlank()) return@launch onError("Le nom ne peut pas être vide")
+                if (trimmed.lowercase() == ADMIN_BADGE_NAME) return@launch onError("Ce nom est réservé")
                 val existing = repo.findBadgeByName(trimmed)
                 if (existing != null) {
-                    if (_myBadges.value.any { it.id == existing.id })
-                        return@launch onError("Tu portes déjà ce badge !")
-                    if (!userIsAdmin && _myBadges.value.isNotEmpty())
-                        return@launch onError("Retire ton badge actuel pour en porter un autre")
+                    if (_myBadges.value.any { it.id == existing.id }) return@launch onError("Tu portes déjà ce badge !")
+                    if (!userIsAdmin && _myBadges.value.isNotEmpty()) return@launch onError("Retire ton badge actuel d'abord")
                     repo.wearBadge(existing.id, currentUserId)
                 } else {
-                    if (!userIsAdmin && _myBadges.value.isNotEmpty())
-                        return@launch onError("Tu as déjà un badge. Retire-le d'abord")
+                    if (!userIsAdmin && _myBadges.value.isNotEmpty()) return@launch onError("Tu as déjà un badge. Retire-le d'abord")
                     repo.createBadge(trimmed, colorHex, currentUserId)
                 }
-                val updated = repo.getProfile(currentUserId)
-                updated?.let { checkAchievements(it) }
+                repo.getProfile(currentUserId)?.let { checkAchievements(it) }
                 onSuccess()
             } catch (e: Exception) { onError(e.message ?: "Erreur") }
         }
     }
 
     fun wearExistingBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val profile    = _myProfile.value ?: return
+        val profile     = _myProfile.value ?: return
         val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
         viewModelScope.launch {
             try {
                 val badge = _allBadges.value.find { it.id == badgeId }
                     ?: return@launch onError("Badge introuvable")
-                if (badge.name == ADMIN_BADGE_NAME)
-                    return@launch onError("Badge réservé à l'admin")
-                if (_myBadges.value.any { it.id == badgeId })
-                    return@launch onError("Tu portes déjà ce badge !")
-                if (!userIsAdmin && _myBadges.value.isNotEmpty())
-                    return@launch onError("Retire ton badge actuel avant")
+                if (badge.name == ADMIN_BADGE_NAME) return@launch onError("Badge réservé")
+                if (_myBadges.value.any { it.id == badgeId }) return@launch onError("Tu portes déjà ce badge !")
+                if (!userIsAdmin && _myBadges.value.isNotEmpty()) return@launch onError("Retire ton badge actuel avant")
                 repo.wearBadge(badgeId, currentUserId)
                 onSuccess()
             } catch (e: Exception) { onError(e.message ?: "Erreur") }
@@ -326,7 +333,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         badgeId: String, displayName: String, colorHex: String,
         onSuccess: () -> Unit, onError: (String) -> Unit
     ) {
-        val profile    = _myProfile.value ?: return
+        val profile     = _myProfile.value ?: return
         val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
         viewModelScope.launch {
             try {
@@ -336,10 +343,8 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch onError("Tu ne peux modifier que tes badges")
                 val trimmed = displayName.trim()
                 if (trimmed.isBlank()) return@launch onError("Nom vide")
-                if (trimmed.lowercase() != badge.name) {
-                    if (repo.findBadgeByName(trimmed) != null)
-                        return@launch onError("Ce nom existe déjà")
-                }
+                if (trimmed.lowercase() != badge.name && repo.findBadgeByName(trimmed) != null)
+                    return@launch onError("Ce nom existe déjà")
                 repo.updateBadge(badgeId, trimmed, colorHex)
                 onSuccess()
             } catch (e: Exception) { onError(e.message ?: "Erreur") }
@@ -347,7 +352,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteBadge(badgeId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val profile    = _myProfile.value ?: return
+        val profile     = _myProfile.value ?: return
         val userIsAdmin = isAdmin(currentUserId) || profile.isAdmin
         viewModelScope.launch {
             try {
@@ -361,18 +366,110 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ── Posts ─────────────────────────────────────────────────────────────────
+    // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+
+    private fun listenNotifications() {
+        notifJob?.cancel()
+        notifJob = viewModelScope.launch {
+            repo.listenToNotifications(currentUserId)
+                .catch { /* Index manquant ou erreur Firestore — silencieux */ }
+                .collect { _notifications.value = it }
+        }
+    }
+
+    fun markNotificationRead(notifId: String) = viewModelScope.launch {
+        repo.markNotificationRead(notifId)
+    }
+
+    fun markAllNotificationsRead() = viewModelScope.launch {
+        repo.markAllNotificationsRead(currentUserId)
+    }
+
+    fun deleteNotification(notifId: String) = viewModelScope.launch {
+        repo.deleteNotification(notifId)
+    }
+
+    /**
+     * Extrait les @mentions du texte et crée les notifications correspondantes.
+     * Gère @everyone (admin only) et @username individuel.
+     */
+    private suspend fun handleMentions(
+        text: String,
+        fromUserId: String,
+        fromUsername: String,
+        fromAdmin: Boolean,
+        postId: String = "",
+        convId: String = ""
+    ) {
+        val now = System.currentTimeMillis()
+
+        // @everyone (admin uniquement)
+        if (fromAdmin &&
+            Regex("@(everyone|tout_le_monde|tous)", RegexOption.IGNORE_CASE).containsMatchIn(text)
+        ) {
+            val base = mapOf(
+                "type"           to "mention_everyone",
+                "fromUserId"     to fromUserId,
+                "fromUsername"   to fromUsername,
+                "fromIsAdmin"    to true,
+                "postId"         to postId,
+                "conversationId" to convId,
+                "content"        to text.take(150),
+                "isRead"         to false,
+                "timestamp"      to now
+            )
+            repo.createNotificationsForAll(base, fromUserId)
+            // Notif OS pour l'utilisateur local (les autres reçoivent via Firestore)
+            notif.showEveryoneMentionNotification(fromUsername, text)
+            return  // Pas de mentions individuelles si @everyone
+        }
+
+        // Mentions individuelles : @username
+        val mentionedUsernames = extractMentions(text)
+        mentionedUsernames.forEach { username ->
+            val targetProfile = repo.findProfileByUsername(username) ?: return@forEach
+            if (targetProfile.userId == fromUserId) return@forEach  // pas de self-mention
+
+            repo.createNotification(mapOf(
+                "targetUserId"   to targetProfile.userId,
+                "type"           to "mention",
+                "fromUserId"     to fromUserId,
+                "fromUsername"   to fromUsername,
+                "fromIsAdmin"    to fromAdmin,
+                "postId"         to postId,
+                "conversationId" to convId,
+                "content"        to text.take(150),
+                "isRead"         to false,
+                "timestamp"      to now
+            ))
+            // Notif OS uniquement pour l'utilisateur local mentionné
+            if (targetProfile.userId == currentUserId) {
+                if (fromAdmin || notifyMentions.value)
+                    notif.showMentionNotification(fromUsername, text, fromAdmin)
+            }
+        }
+    }
+
+    /** Extrait les usernames des @mentions (sans @everyone) */
+    private fun extractMentions(text: String): List<String> {
+        return Regex("@([\\w]+)")
+            .findAll(text)
+            .map { it.groupValues[1] }
+            .filter { username ->
+                username.isNotBlank() &&
+                        username.lowercase() !in setOf("everyone", "tout_le_monde", "tous")
+            }
+            .distinct()
+            .toList()
+    }
+
+    // ── POSTS ─────────────────────────────────────────────────────────────────
 
     private fun listenPosts() {
         postsJob?.cancel()
         postsJob = viewModelScope.launch {
             repo.listenToPosts().collect { posts ->
-                val prev = _allPosts.value
-                if (prev.isNotEmpty() && notifyPosts.value) {
-                    posts.firstOrNull { n -> prev.none { it.id == n.id } && n.userId != currentUserId }
-                        ?.let { notif.showPostNotification(if (it.isAnonymous) "Quelqu'un 🎭" else it.username, it.content) }
-                }
-                _allPosts.value   = posts
+                _allPosts.value     = posts
                 _isRefreshing.value = false
             }
         }
@@ -383,16 +480,24 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         listenPosts()
     }
 
-    fun createPost(content: String, type: String = "normal",
-                   pollOpt1: String = "", pollOpt2: String = "") {
-        val profile = _myProfile.value ?: return
-        val isConf  = type == "confession"
+    fun createPost(
+        content: String,
+        type: String = "normal",
+        pollOpt1: String = "",
+        pollOpt2: String = ""
+    ) {
+        val profile    = _myProfile.value ?: return
+        val isConf     = type == "confession"
+        val fromAdmin  = isAdmin(currentUserId) || profile.isAdmin
+        val displayName = if (isConf) "Quelqu'un 🎭" else profile.username
+        val postContent = if (type != "poll") "Askip $content" else content
+
         viewModelScope.launch {
             runCatching {
-                repo.createPost(mapOf(
+                val postId = repo.createPost(mapOf(
                     "userId"       to currentUserId,
-                    "username"     to if (isConf) "Quelqu'un 🎭" else profile.username,
-                    "content"      to if (type != "poll") "Askip $content" else content,
+                    "username"     to displayName,
+                    "content"      to postContent,
                     "postType"     to type,
                     "isAnonymous"  to isConf,
                     "pollOption1"  to pollOpt1,
@@ -409,6 +514,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                     "isPinned"     to false,
                     "timestamp"    to System.currentTimeMillis()
                 ))
+
                 val counterField = when (type) {
                     "confession" -> "confessionsCount"
                     "poll"       -> "pollsCount"
@@ -417,6 +523,38 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                 repo.incrementCounter(currentUserId, counterField)
                 repo.updateStreak(currentUserId)
                 repo.getProfile(currentUserId)?.let { checkAchievements(it) }
+
+                val now = System.currentTimeMillis()
+
+                // Notifications nouveau post (seulement si non-confession)
+                if (!isConf) {
+                    val notifBase = mapOf(
+                        "type"           to if (fromAdmin) "new_post_admin" else "new_post",
+                        "fromUserId"     to currentUserId,
+                        "fromUsername"   to profile.username,
+                        "fromIsAdmin"    to fromAdmin,
+                        "postId"         to postId,
+                        "conversationId" to "",
+                        "content"        to postContent.take(150),
+                        "isRead"         to false,
+                        "timestamp"      to now
+                    )
+                    repo.createNotificationsForAll(notifBase, currentUserId)
+                    // Notif OS
+                    if (fromAdmin) notif.showAdminPostNotification(profile.username, postContent)
+                    else if (notifyPosts.value) notif.showPostNotification(profile.username, postContent)
+                }
+
+                // Mentions dans le post
+                if (!isConf) {
+                    handleMentions(
+                        text         = postContent,
+                        fromUserId   = currentUserId,
+                        fromUsername = displayName,
+                        fromAdmin    = fromAdmin,
+                        postId       = postId
+                    )
+                }
             }.onFailure { error.value = it.message }
         }
     }
@@ -450,7 +588,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { repo.votePoll(postId, uid, option) } }
     }
 
-    // ── Stories ───────────────────────────────────────────────────────────────
+    // ── STORIES ───────────────────────────────────────────────────────────────
 
     private fun listenStories() {
         storiesJob?.cancel()
@@ -471,7 +609,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                     "emoji"           to emoji,
                     "backgroundColor" to bgColor,
                     "timestamp"       to now,
-                    "expiresAt"       to (now + 24L * 3600_000L)
+                    "expiresAt"       to (now + 24L * 3_600_000L)
                 ))
                 repo.incrementCounter(currentUserId, "storiesCount")
                 repo.updateStreak(currentUserId)
@@ -484,7 +622,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { repo.deleteStory(storyId) }
     }
 
-    // ── Comments ──────────────────────────────────────────────────────────────
+    // ── COMMENTS ──────────────────────────────────────────────────────────────
 
     fun listenComments(postId: String) {
         commentJob?.cancel()
@@ -494,7 +632,8 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addComment(postId: String, content: String) {
-        val profile = _myProfile.value ?: return
+        val profile   = _myProfile.value ?: return
+        val fromAdmin = isAdmin(currentUserId) || profile.isAdmin
         viewModelScope.launch {
             runCatching {
                 repo.addComment(postId, mapOf(
@@ -507,6 +646,14 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                 repo.incrementCounter(currentUserId, "commentsCount")
                 repo.updateStreak(currentUserId)
                 repo.getProfile(currentUserId)?.let { checkAchievements(it) }
+
+                handleMentions(
+                    text         = content,
+                    fromUserId   = currentUserId,
+                    fromUsername = profile.username,
+                    fromAdmin    = fromAdmin,
+                    postId       = postId
+                )
             }
         }
     }
@@ -515,7 +662,7 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { repo.deleteComment(postId, commentId) }
     }
 
-    // ── Conversations ─────────────────────────────────────────────────────────
+    // ── CONVERSATIONS ─────────────────────────────────────────────────────────
 
     private fun listenConversations() {
         convJob?.cancel()
@@ -528,7 +675,9 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         val me = _myProfile.value ?: return
         viewModelScope.launch {
             runCatching {
-                val convId = repo.getOrCreateConversation(currentUserId, me.username, otherId, otherUsername)
+                val convId = repo.getOrCreateConversation(
+                    currentUserId, me.username, otherId, otherUsername
+                )
                 repo.incrementCounter(currentUserId, "convsStarted")
                 repo.getProfile(currentUserId)?.let { checkAchievements(it) }
                 onDone(convId)
@@ -541,9 +690,15 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         msgJob = viewModelScope.launch {
             repo.listenToMessages(convId).collect { newMsgs ->
                 val prev = _messages.value
-                if (prev.isNotEmpty() && notifyMessages.value) {
-                    newMsgs.firstOrNull { n -> prev.none { it.id == n.id } && n.senderId != currentUserId }
-                        ?.let { notif.showMessageNotification(it.senderUsername, it.content) }
+                if (prev.isNotEmpty()) {
+                    newMsgs.firstOrNull { n ->
+                        prev.none { it.id == n.id } && n.senderId != currentUserId
+                    }?.let { msg ->
+                        val fromAdmin = isAdmin(msg.senderId)
+                        if (fromAdmin || notifyMessages.value) {
+                            notif.showMessageNotification(msg.senderUsername, msg.content, fromAdmin)
+                        }
+                    }
                 }
                 _messages.value = newMsgs
             }
@@ -554,6 +709,8 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
         val profile    = _myProfile.value ?: return
         val conv       = _conversations.value.find { it.id == convId } ?: return
         val receiverId = conv.participants.firstOrNull { it != currentUserId } ?: return
+        val fromAdmin  = isAdmin(currentUserId) || profile.isAdmin
+
         viewModelScope.launch {
             runCatching {
                 repo.sendMessage(convId, mapOf(
@@ -563,17 +720,35 @@ class AskipViewModel(application: Application) : AndroidViewModel(application) {
                     "content"        to content,
                     "timestamp"      to System.currentTimeMillis()
                 ), receiverId)
+
+                // Notification Firestore pour le destinataire
+                repo.createNotification(mapOf(
+                    "targetUserId"   to receiverId,
+                    "type"           to "message",
+                    "fromUserId"     to currentUserId,
+                    "fromUsername"   to profile.username,
+                    "fromIsAdmin"    to fromAdmin,
+                    "postId"         to "",
+                    "conversationId" to convId,
+                    "content"        to content.take(100),
+                    "isRead"         to false,
+                    "timestamp"      to System.currentTimeMillis()
+                ))
             }
         }
     }
 
-    fun markRead(convId: String) = viewModelScope.launch { repo.markRead(convId, currentUserId) }
+    fun markRead(convId: String) = viewModelScope.launch {
+        repo.markRead(convId, currentUserId)
+    }
 
     fun getUnread(conv: Conversation) = (conv.unreadCounts[currentUserId] ?: 0L).toInt()
 
-    // ── Settings ──────────────────────────────────────────────────────────────
+    // ── SETTINGS ──────────────────────────────────────────────────────────────
 
     fun setNotifyMessages(v: Boolean) = viewModelScope.launch { settings.setNotifyMessages(v) }
     fun setNotifyPosts(v: Boolean)    = viewModelScope.launch { settings.setNotifyPosts(v) }
+    fun setNotifyMentions(v: Boolean) = viewModelScope.launch { settings.setNotifyMentions(v) }
+
     fun clearError() { error.value = null }
 }
