@@ -7,23 +7,27 @@ data class Post(
     val userId: String = "",
     val username: String = "",
     val content: String = "",
-    val postType: String = "normal",   // "normal" | "poll" | "confession"
+    val userPhotoUrl: String = "",
+    val postType: String = "normal",
     @get:PropertyName("isAnonymous")
     @set:PropertyName("isAnonymous")
     var isAnonymous: Boolean = false,
-    // Sondage
+    // ── Média ─────────────────────────────────────────────────────────────────
+    val imageUrl: String = "",
+    val videoUrl: String = "",
+    // ── Sondage ───────────────────────────────────────────────────────────────
     val pollOption1: String = "",
     val pollOption2: String = "",
     val pollVotes1: Int = 0,
     val pollVotes2: Int = 0,
     val pollVoters: List<String> = emptyList(),
-    // Réactions
+    // ── Réactions ─────────────────────────────────────────────────────────────
     val likedBy: List<String> = emptyList(),
     val fireBy: List<String> = emptyList(),
     val lolBy: List<String> = emptyList(),
     val shockBy: List<String> = emptyList(),
     val eyesBy: List<String> = emptyList(),
-    // Meta
+    // ── Meta ──────────────────────────────────────────────────────────────────
     val commentCount: Int = 0,
     @get:PropertyName("isPinned")
     @set:PropertyName("isPinned")
@@ -39,7 +43,7 @@ data class Post(
         else           -> null
     }
 
-    fun reactionCount(emoji: String): Int = when (emoji) {
+    fun reactionCount(emoji: String) = when (emoji) {
         "❤️" -> likedBy.size
         "🔥" -> fireBy.size
         "😂" -> lolBy.size
@@ -52,13 +56,9 @@ data class Post(
         likedBy.size + fireBy.size + lolBy.size + shockBy.size + eyesBy.size
 
     companion object {
-        fun reactionFieldFor(emoji: String): String = when (emoji) {
-            "❤️" -> "likedBy"
-            "🔥" -> "fireBy"
-            "😂" -> "lolBy"
-            "😱" -> "shockBy"
-            "👀" -> "eyesBy"
-            else -> "likedBy"
+        fun reactionFieldFor(emoji: String) = when (emoji) {
+            "❤️" -> "likedBy"; "🔥" -> "fireBy"; "😂" -> "lolBy"
+            "😱" -> "shockBy"; "👀" -> "eyesBy"; else -> "likedBy"
         }
     }
 }

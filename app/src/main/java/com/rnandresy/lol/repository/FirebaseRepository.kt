@@ -2,13 +2,25 @@ package com.rnandresy.lol.repository
 
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.*
-import com.rnandresy.lol.model.*
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import com.rnandresy.lol.model.Achievement
+import com.rnandresy.lol.model.AppNotification
+import com.rnandresy.lol.model.Badge
+import com.rnandresy.lol.model.Comment
+import com.rnandresy.lol.model.Conversation
+import com.rnandresy.lol.model.Message
+import com.rnandresy.lol.model.Post
+import com.rnandresy.lol.model.Story
+import com.rnandresy.lol.model.UserProfile
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 class FirebaseRepository {
 
@@ -48,15 +60,28 @@ class FirebaseRepository {
 
     suspend fun createDefaultProfile(uid: String, username: String) {
         db.collection("profiles").document(uid).set(mapOf(
-            "userId" to uid, "username" to username, "age" to 0, "bio" to "",
-            "classeENI" to "", "relationshipStatus" to "",
-            "themeColor" to "#7C4DFF", "avatarFrame" to "none",
-            "moodEmoji" to "", "moodText" to "",
-            "badgeIds" to emptyList<String>(),
-            "postsCount" to 0, "commentsCount" to 0, "confessionsCount" to 0,
-            "storiesCount" to 0, "pollsCount" to 0, "convsStarted" to 0,
-            "totalReactionsReceived" to 0, "streak" to 0, "lastActiveDate" to "",
-            "hasBadgeENI" to false, "isAdmin" to false
+            "userId"           to uid,
+            "username"         to username,
+            "age"              to 0,
+            "bio"              to "",
+            "classeENI"        to "",
+            "relationshipStatus" to "",
+            "themeColor"       to "#7C4DFF",
+            "avatarFrame"      to "none",
+            "moodEmoji"        to "",
+            "moodText"         to "",
+            "badgeIds"         to emptyList<String>(),
+            "postsCount"       to 0,
+            "commentsCount"    to 0,
+            "confessionsCount" to 0,
+            "storiesCount"     to 0,
+            "pollsCount"       to 0,
+            "convsStarted"     to 0,
+            "streak"           to 0,
+            "lastActiveDate"   to "",
+            "hasBadgeENI"      to false,
+            "isAdmin"          to false
+            // ❌ totalReactionsReceived supprimé
         )).await()
     }
 
@@ -355,8 +380,7 @@ class FirebaseRepository {
             batch.update(ref, Post.reactionFieldFor(oldEmoji), FieldValue.arrayRemove(uid))
         batch.update(ref, Post.reactionFieldFor(emoji), FieldValue.arrayUnion(uid))
         batch.commit().await()
-        if (postOwnerId != uid)
-            runCatching { incrementCounter(postOwnerId, "totalReactionsReceived") }
+        // ❌ Supprimé : incrementCounter(postOwnerId, "totalReactionsReceived")
     }
 
     suspend fun removeReaction(postId: String, uid: String, emoji: String) {

@@ -1,5 +1,9 @@
 package com.rnandresy.lol.ui.profile
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,7 +27,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
@@ -43,6 +49,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +60,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,9 +73,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.rnandresy.lol.model.Badge
 import com.rnandresy.lol.model.UserProfile
 import com.rnandresy.lol.ui.feed.AdminBadge
@@ -92,55 +102,88 @@ fun ProfileScreen(
     val isMe          = userId == vm.currentUserId
     val myProfile    by vm.myProfile.collectAsState()
     val viewedProf   by vm.viewedProfile.collectAsState()
-    val profile       = if (isMe) myProfile else viewedProf
     val allBadges    by vm.allBadges.collectAsState()
     val myBadges     by vm.myBadges.collectAsState()
+    val loading      by vm.loading.collectAsState()
+    val uploadProgress by vm.uploadProgress.collectAsState()
+
+    val profile       = if (isMe) myProfile else viewedProf
     val achievements  = if (isMe) vm.myAchievements.collectAsState().value
     else vm.viewedAchievements.collectAsState().value
 
     var showBadgeMgr by remember { mutableStateOf(false) }
     var badgeError   by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(userId) { if (!isMe) vm.loadProfile(userId) }
+    LaunchedEffect(userId) {
+        if (!isMe) vm.loadProfile(userId)
+    }
 
     val themeColor = runCatching {
         Color(android.graphics.Color.parseColor(profile?.themeColor ?: "#7C4DFF"))
     }.getOrElse { Color(0xFF7C4DFF) }
 
-    val userIsAdmin = isAdmin(userId) || profile?.isAdmin == true
-    val myIsAdmin   = isAdmin(vm.currentUserId) || myProfile?.isAdmin == true
-    val unlockedIds = achievements.map { it.id }.toSet()
+    val userIsAdmin  = isAdmin(userId) || profile?.isAdmin == true
+    val myIsAdmin    = isAdmin(vm.currentUserId) || myProfile?.isAdmin == true
+    val unlockedIds  = achievements.map { it.id }.toSet()
 
-    // Badges du profil visité
     val displayBadges: List<Badge> = if (isMe) {
         myBadges
     } else {
         allBadges.filter { b -> b.id in (profile?.badgeIds ?: emptyList()) }
     }
 
+    // Pickers
+    val avatarPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? -> uri?.let { vm.uploadAvatar(it) } }
+
+    val coverPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? -> uri?.let { vm.uploadCover(it) } }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title          = { Text(if (isMe) "Mon profil" else (profile?.username ?: "Profil")) },
+                title          = {
+                    Text(
+                        if (isMe) "Mon profil" else (profile?.username ?: "Profil"),
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
                 actions = {
                     if (isMe) {
-                        IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, null) }
-                        IconButton(onClick = onEditProfile) { Icon(Icons.Default.Edit, null) }
+                        IconButton(onClick = onSettings) {
+                            Icon(Icons.Default.Settings, null)
+                        }
+                        IconButton(onClick = onEditProfile) {
+                            Icon(Icons.Default.Edit, null)
+                        }
                     } else if (profile != null) {
                         IconButton(onClick = {
                             val me = myProfile ?: return@IconButton
-                            vm.startConversation(profile.userId, profile.username) { onOpenChat(it) }
-                        }) { Icon(Icons.Default.Chat, null) }
+                            vm.startConversation(profile.userId, profile.username) {
+                                onOpenChat(it)
+                            }
+                        }) {
+                            Icon(Icons.Default.Chat, null)
+                        }
                     }
                 }
             )
         }
     ) { pad ->
+
         if (profile == null) {
-            Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+            Box(
+                modifier         = Modifier.fillMaxSize().padding(pad),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
             return@Scaffold
@@ -150,27 +193,41 @@ fun ProfileScreen(
             modifier            = Modifier.fillMaxSize().padding(pad),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // ── Bannière thème ────────────────────────────────────────────────
+
+            // ── Bannière / Couverture ─────────────────────────────────────────
             item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(
-                                    themeColor.copy(alpha = 0.6f),
-                                    themeColor,
-                                    themeColor.copy(alpha = 0.8f)
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp)) {
+
+                    // Image de couverture ou dégradé thème
+                    if (profile.coverUrl.isNotBlank()) {
+                        AsyncImage(
+                            model              = profile.coverUrl,
+                            contentDescription = null,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        themeColor.copy(alpha = 0.55f),
+                                        themeColor,
+                                        themeColor.copy(alpha = 0.75f)
+                                    )
                                 )
                             )
                         )
-                ) {
+                    }
+
+                    // Humeur du jour (overlay bas-gauche)
                     if (profile.moodEmoji.isNotBlank()) {
                         Surface(
                             color    = Color.Black.copy(alpha = 0.3f),
                             shape    = RoundedCornerShape(20.dp),
-                            modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(10.dp)
                         ) {
                             Row(
                                 modifier              = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -188,46 +245,142 @@ fun ProfileScreen(
                             }
                         }
                     }
-                    // Cadre avatar dans la bannière
-                    if (profile.avatarFrame != "none") {
-                        val frameEmoji = when (profile.avatarFrame) {
-                            "fire"    -> "🔥"; "star" -> "⭐"
-                            "rainbow" -> "🌈"; "gold" -> "👑"
-                            else -> ""
-                        }
-                        Text(
-                            frameEmoji,
-                            fontSize = 28.sp,
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 48.dp, end = 20.dp)
+
+                    // Barre de progression upload couverture
+                    if (isMe && loading && uploadProgress in 1..99) {
+                        LinearProgressIndicator(
+                            progress = { uploadProgress / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
                         )
+                    }
+
+                    // Bouton changer couverture
+                    if (isMe) {
+                        IconButton(
+                            onClick  = {
+                                coverPicker.launch(
+                                    PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            },
+                            enabled  = !loading,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp)
+                        ) {
+                            Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.5f)) {
+                                Icon(
+                                    Icons.Default.AddPhotoAlternate, null,
+                                    tint     = Color.White,
+                                    modifier = Modifier.padding(8.dp).size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             // ── Avatar ────────────────────────────────────────────────────────
             item {
-                Box(modifier = Modifier.offset(y = (-40).dp)) {
+                Box(
+                    modifier         = Modifier.offset(y = (-42).dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    // Cercle avatar
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
+                            .size(82.dp)
                             .clip(CircleShape)
                             .border(3.dp, MaterialTheme.colorScheme.background, CircleShape)
-                            .background(
-                                if (userIsAdmin) Color(0xFFFF9800).copy(alpha = 1f)
-                                else themeColor.copy(alpha = 1f)
-                            )
                             .then(
-                                if (userIsAdmin) Modifier.border(2.dp, Color(0xFFFFD700), CircleShape)
+                                if (isMe && !loading)
+                                    Modifier.clickable {
+                                        avatarPicker.launch(
+                                            PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            )
+                                        )
+                                    }
                                 else Modifier
-                            ),
-                        contentAlignment = Alignment.Center
+                            )
                     ) {
-                        Text(
-                            text       = profile.username.firstOrNull()?.uppercase() ?: "?",
-                            fontSize   = 30.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color      = if (userIsAdmin) Color(0xFFFFFFFF) else Color(0xFF000000)
-                        )
+                        if (profile.photoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model              = profile.photoUrl,
+                                contentDescription = null,
+                                contentScale       = ContentScale.Crop,
+                                modifier           = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            // Avatar lettres initiale
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        if (userIsAdmin) Color(0xFFFFD700).copy(alpha = 0.22f)
+                                        else themeColor.copy(alpha = 0.28f)
+                                    )
+                                    .then(
+                                        if (userIsAdmin)
+                                            Modifier.border(2.dp, Color(0xFFFFD700), CircleShape)
+                                        else Modifier
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text       = profile.username.firstOrNull()?.uppercase() ?: "?",
+                                    fontSize   = 32.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color      = if (userIsAdmin) Color(0xFFFFD700) else themeColor
+                                )
+                            }
+                        }
+                    }
+
+                    // Indicateur caméra / progression
+                    if (isMe) {
+                        Surface(
+                            shape    = CircleShape,
+                            color    = if (loading) MaterialTheme.colorScheme.surfaceVariant
+                            else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            if (loading) {
+                                CircularProgressIndicator(
+                                    modifier    = Modifier.padding(5.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.CameraAlt, null,
+                                    tint     = Color.White,
+                                    modifier = Modifier.padding(5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Cadre avatar (emoji en overlay)
+                    if (profile.avatarFrame != "none") {
+                        val frameEmoji = when (profile.avatarFrame) {
+                            "fire"    -> "🔥"
+                            "star"    -> "⭐"
+                            "rainbow" -> "🌈"
+                            "gold"    -> "👑"
+                            else      -> ""
+                        }
+                        if (frameEmoji.isNotBlank()) {
+                            Text(
+                                frameEmoji,
+                                fontSize = 18.sp,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = (-2).dp, y = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -237,10 +390,12 @@ fun ProfileScreen(
                 Column(
                     modifier            = Modifier
                         .fillMaxWidth()
-                        .offset(y = (-28).dp)
+                        .offset(y = (-30).dp)
                         .padding(horizontal = 20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+
+                    // Nom + badges officiels
                     Row(
                         verticalAlignment     = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -254,6 +409,7 @@ fun ProfileScreen(
                         if (profile.hasBadgeENI) ENIBadge()
                     }
 
+                    // Classe ENI
                     if (profile.classeENI.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
                         Text(
@@ -263,7 +419,7 @@ fun ProfileScreen(
                         )
                     }
 
-                    // ── Badges personnalisés ───────────────────────────────────
+                    // Badges personnalisés
                     if (displayBadges.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         LazyRow(
@@ -273,13 +429,14 @@ fun ProfileScreen(
                             items(displayBadges, key = { it.id }) { badge ->
                                 if (isMe) {
                                     BadgeChipManageable(
-                                        badge       = badge,
-                                        canEdit     = badge.createdBy == vm.currentUserId || myIsAdmin,
-                                        canDelete   = badge.createdBy == vm.currentUserId || myIsAdmin,
-                                        onUnwear    = { vm.unwearBadge(badge.id) },
-                                        onEdit      = { showBadgeMgr = true },
-                                        onDelete    = {
-                                            vm.deleteBadge(badge.id,
+                                        badge     = badge,
+                                        canEdit   = badge.createdBy == vm.currentUserId || myIsAdmin,
+                                        canDelete = badge.createdBy == vm.currentUserId || myIsAdmin,
+                                        onUnwear  = { vm.unwearBadge(badge.id) },
+                                        onEdit    = { showBadgeMgr = true },
+                                        onDelete  = {
+                                            vm.deleteBadge(
+                                                badge.id,
                                                 onSuccess = {},
                                                 onError   = { badgeError = it }
                                             )
@@ -292,16 +449,17 @@ fun ProfileScreen(
                         }
                     }
 
+                    // Bio
                     if (profile.bio.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
                         Text(
                             profile.bio,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style     = MaterialTheme.typography.bodyMedium,
+                            color     = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    // ── Infos perso ───────────────────────────────────────────
+                    // Infos perso
                     Spacer(Modifier.height(10.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (profile.age > 0)
@@ -309,19 +467,19 @@ fun ProfileScreen(
                         if (profile.relationshipStatus.isNotBlank())
                             item { InfoChip("💑 ${profile.relationshipStatus}") }
                         if (profile.streak > 1)
-                            item { InfoChip("🔥 ${profile.streak} jours") }
+                            item { InfoChip("🔥 ${profile.streak} jours actifs") }
                     }
 
-                    // ── Stats ─────────────────────────────────────────────────
-                    Spacer(Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        StatBlock(profile.postsCount.toString(),              "posts")
-                        StatBlock(profile.confessionsCount.toString(),         "confessions")
-                        StatBlock(profile.totalReactionsReceived.toString(),   "❤️ reçus")
+                    // ── Activité ──────────────────────────────────────────────
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                        StatBlock("${profile.postsCount}",    "posts")
+                        StatBlock("${profile.commentsCount}", "commentaires")
+                        StatBlock("${profile.storiesCount}",  "stories")
                     }
 
                     // ── Trophées ──────────────────────────────────────────────
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(20.dp))
                     Row(
                         modifier              = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -334,10 +492,11 @@ fun ProfileScreen(
                         )
                         if (unlockedIds.isNotEmpty()) {
                             TextButton(onClick = { onAchievements(userId) }) {
-                                Text("Tout voir (${unlockedIds.size}/${ALL_ACHIEVEMENTS.size})")
+                                Text("Voir tout (${unlockedIds.size}/${ALL_ACHIEVEMENTS.size})")
                             }
                         }
                     }
+
                     if (unlockedIds.isEmpty()) {
                         Text(
                             "Aucun trophée encore… commence à poster ! 💪",
@@ -346,17 +505,25 @@ fun ProfileScreen(
                         )
                     } else {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(ALL_ACHIEVEMENTS.filter { it.id in unlockedIds }.take(5)) { def ->
+                            items(
+                                ALL_ACHIEVEMENTS
+                                    .filter { it.id in unlockedIds }
+                                    .take(5)
+                            ) { def ->
                                 val ac = runCatching {
                                     Color(android.graphics.Color.parseColor(def.color))
                                 }.getOrElse { Color.Gray }
                                 Surface(
-                                    color    = ac.copy(alpha = 0.15f),
+                                    color    = ac.copy(alpha = 0.12f),
                                     shape    = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.border(1.dp, ac.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                    modifier = Modifier.border(
+                                        1.dp, ac.copy(alpha = 0.4f), RoundedCornerShape(12.dp)
+                                    )
                                 ) {
                                     Column(
-                                        modifier            = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier            = Modifier.padding(
+                                            horizontal = 10.dp, vertical = 7.dp
+                                        ),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(def.icon, fontSize = 20.sp)
@@ -374,7 +541,7 @@ fun ProfileScreen(
                         }
                     }
 
-                    // ── Badge manager (isMe) ───────────────────────────────────
+                    // ── Bouton gérer badges (isMe) ─────────────────────────────
                     if (isMe) {
                         Spacer(Modifier.height(16.dp))
                         OutlinedButton(
@@ -387,12 +554,13 @@ fun ProfileScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(40.dp))
                 }
             }
         }
     }
 
+    // ── Dialog gestion badges ─────────────────────────────────────────────────
     if (showBadgeMgr && isMe) {
         BadgeManagerDialog(
             vm        = vm,
@@ -433,7 +601,7 @@ fun InfoChip(text: String) {
     ) {
         Text(
             text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style    = MaterialTheme.typography.labelSmall
         )
     }
@@ -442,8 +610,16 @@ fun InfoChip(text: String) {
 @Composable
 fun StatBlock(value: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style      = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -466,16 +642,25 @@ fun BadgeChipManageable(
             color    = color.copy(alpha = 0.15f),
             shape    = RoundedCornerShape(50),
             modifier = Modifier
-                .border(1.dp, color.copy(alpha = 0.6f), RoundedCornerShape(50))
+                .border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(50))
                 .clickable { showMenu = true }
         ) {
             Row(
                 modifier          = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(badge.displayName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
+                Text(
+                    badge.displayName,
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = color
+                )
                 Spacer(Modifier.width(4.dp))
-                Icon(Icons.Default.MoreVert, null, tint = color.copy(alpha = 0.6f), modifier = Modifier.size(12.dp))
+                Icon(
+                    Icons.Default.MoreVert, null,
+                    tint     = color.copy(alpha = 0.6f),
+                    modifier = Modifier.size(12.dp)
+                )
             }
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -493,9 +678,16 @@ fun BadgeChipManageable(
             }
             if (canDelete) {
                 DropdownMenuItem(
-                    text        = { Text("Supprimer", color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                    onClick     = { showMenu = false; onDelete() }
+                    text        = {
+                        Text("Supprimer", color = MaterialTheme.colorScheme.error)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Delete, null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    },
+                    onClick = { showMenu = false; onDelete() }
                 )
             }
         }
@@ -518,69 +710,93 @@ fun BadgeManagerDialog(
         myBadges.none { it.id == b.id } && b.name != ADMIN_BADGE_NAME
     }
 
-    var tab         by remember { mutableStateOf(0) }
-    var editBadge   by remember { mutableStateOf<Badge?>(null) }
-    var badgeName   by remember { mutableStateOf("") }
-    var badgeColor  by remember { mutableStateOf(BADGE_COLORS.first()) }
+    var tab       by remember { mutableStateOf(0) }
+    var editBadge by remember { mutableStateOf<Badge?>(null) }
+    var badgeName  by remember { mutableStateOf("") }
+    var badgeColor by remember { mutableStateOf(BADGE_COLORS.first()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title            = { Text("🏷️ Badges") },
         text             = {
-            Column(modifier = Modifier.heightIn(max = 480.dp)) {
+            Column(modifier = Modifier.heightIn(max = 500.dp)) {
+
                 val tabs = buildList {
                     add("Porter")
                     add("Créer")
-                    if (myBadges.any { it.createdBy == vm.currentUserId } || myIsAdmin)
-                        add("Modifier")
+                    val canModify = myBadges.any {
+                        it.createdBy == vm.currentUserId
+                    } || myIsAdmin
+                    if (canModify) add("Modifier")
                 }
+
                 TabRow(selectedTabIndex = tab) {
                     tabs.forEachIndexed { i, title ->
                         Tab(
                             selected = tab == i,
-                            onClick  = { tab = i; editBadge = null; badgeName = ""; badgeColor = BADGE_COLORS.first() }
+                            onClick  = {
+                                tab       = i
+                                editBadge = null
+                                badgeName  = ""
+                                badgeColor = BADGE_COLORS.first()
+                            }
                         ) {
                             Text(title, modifier = Modifier.padding(vertical = 10.dp))
                         }
                     }
                 }
+
                 Spacer(Modifier.height(12.dp))
 
                 when (tab) {
-                    // ── Tab Porter ────────────────────────────────────────────
+
+                    // ── Porter ────────────────────────────────────────────────
                     0 -> {
+                        // Badges portés actuellement
                         if (myBadges.isNotEmpty()) {
-                            Text("Portés actuellement :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Portés :",
+                                style      = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
                             Spacer(Modifier.height(6.dp))
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(myBadges, key = { it.id }) { badge ->
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         BadgeChip(badge.displayName, badge.colorHex)
-                                        Spacer(Modifier.width(4.dp))
+                                        Spacer(Modifier.width(2.dp))
                                         IconButton(
                                             onClick  = { vm.unwearBadge(badge.id) },
                                             modifier = Modifier.size(20.dp)
                                         ) {
-                                            Icon(Icons.Default.Close, null,
+                                            Icon(
+                                                Icons.Default.Close, null,
                                                 tint     = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(14.dp))
+                                                modifier = Modifier.size(13.dp)
+                                            )
                                         }
                                     }
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
+                            Spacer(Modifier.height(12.dp))
                         }
+
+                        // Badges disponibles à porter
                         if (availableBadges.isEmpty()) {
                             Text(
-                                "Aucun autre badge disponible",
+                                "Aucun autre badge disponible pour l'instant.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
-                            Text("Badges disponibles :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Disponibles :",
+                                style      = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
                             Spacer(Modifier.height(6.dp))
                             Column(
-                                modifier            = Modifier.heightIn(max = 200.dp),
+                                modifier            = Modifier.heightIn(max = 220.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 availableBadges.forEach { badge ->
@@ -591,27 +807,41 @@ fun BadgeManagerDialog(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
-                                            .border(1.dp, c.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                            .border(
+                                                1.dp,
+                                                c.copy(alpha = 0.35f),
+                                                RoundedCornerShape(10.dp)
+                                            )
                                             .clickable {
                                                 vm.wearExistingBadge(
-                                                    badge.id,
+                                                    badgeId   = badge.id,
                                                     onSuccess = { onDismiss() },
                                                     onError   = onError
                                                 )
                                             }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment     = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(c))
-                                        Text(badge.displayName, style = MaterialTheme.typography.bodyMedium, color = c, fontWeight = FontWeight.Medium)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .clip(CircleShape)
+                                                .background(c)
+                                        )
+                                        Text(
+                                            badge.displayName,
+                                            style      = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color      = c
+                                        )
                                     }
                                 }
                             }
                         }
                     }
 
-                    // ── Tab Créer ─────────────────────────────────────────────
+                    // ── Créer ─────────────────────────────────────────────────
                     1 -> {
                         if (!myIsAdmin && myBadges.isNotEmpty()) {
                             Surface(
@@ -619,65 +849,96 @@ fun BadgeManagerDialog(
                                 shape  = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    "ℹ️ Tu peux créer un badge, mais retire le tien d'abord pour le porter (sauf admin).",
-                                    modifier = Modifier.padding(8.dp),
+                                    "ℹ️ Tu peux créer un badge, mais tu devras d'abord retirer le tien pour le porter.",
+                                    modifier = Modifier.padding(10.dp),
                                     style    = MaterialTheme.typography.bodySmall
                                 )
                             }
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(10.dp))
                         }
+
                         OutlinedTextField(
                             value         = badgeName,
                             onValueChange = { if (it.length <= 20) badgeName = it },
-                            label         = { Text("Nom du badge") },
+                            label         = { Text("Nom du badge (20 max)") },
                             singleLine    = true,
                             modifier      = Modifier.fillMaxWidth(),
                             shape         = RoundedCornerShape(12.dp)
                         )
-                        Spacer(Modifier.height(10.dp))
-                        Text("Couleur :", style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.height(6.dp))
+
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Couleur :",
+                            style      = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(8.dp))
                         BadgeColorPicker(selected = badgeColor) { badgeColor = it }
+
                         if (badgeName.isNotBlank()) {
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(10.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Aperçu : ", style = MaterialTheme.typography.labelSmall)
+                                Text(
+                                    "Aperçu : ",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                                 BadgeChip(badgeName, badgeColor)
                             }
                         }
                     }
 
-                    // ── Tab Modifier ──────────────────────────────────────────
+                    // ── Modifier ──────────────────────────────────────────────
                     2 -> {
                         val editable = if (myIsAdmin) myBadges
                         else myBadges.filter { it.createdBy == vm.currentUserId }
+
                         if (editBadge == null) {
                             if (editable.isEmpty()) {
-                                Text("Aucun badge à modifier", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "Aucun badge à modifier.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             } else {
-                                Text("Sélectionne un badge :", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Sélectionne un badge :",
+                                    style      = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(Modifier.height(8.dp))
                                 editable.forEach { badge ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { editBadge = badge; badgeName = badge.displayName; badgeColor = badge.colorHex }
-                                            .padding(vertical = 6.dp),
+                                            .clickable {
+                                                editBadge  = badge
+                                                badgeName  = badge.displayName
+                                                badgeColor = badge.colorHex
+                                            }
+                                            .padding(vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment     = Alignment.CenterVertically
                                     ) {
                                         BadgeChip(badge.displayName, badge.colorHex)
-                                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Icon(
+                                            Icons.Default.ChevronRight, null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                             }
                         } else {
+                            // Formulaire modification
                             TextButton(onClick = { editBadge = null }) {
-                                Icon(Icons.Default.ArrowBack, null, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    Icons.Default.ArrowBack, null,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(Modifier.width(4.dp))
                                 Text("Retour")
                             }
+
+                            Spacer(Modifier.height(6.dp))
                             OutlinedTextField(
                                 value         = badgeName,
                                 onValueChange = { if (it.length <= 20) badgeName = it },
@@ -686,16 +947,18 @@ fun BadgeManagerDialog(
                                 modifier      = Modifier.fillMaxWidth(),
                                 shape         = RoundedCornerShape(12.dp)
                             )
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(10.dp))
                             BadgeColorPicker(selected = badgeColor) { badgeColor = it }
+
                             if (badgeName.isNotBlank()) {
-                                Spacer(Modifier.height(6.dp))
+                                Spacer(Modifier.height(8.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Aperçu : ", style = MaterialTheme.typography.labelSmall)
                                     BadgeChip(badgeName, badgeColor)
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
+
+                            Spacer(Modifier.height(12.dp))
                             Button(
                                 onClick  = {
                                     editBadge?.let { b ->
@@ -708,13 +971,17 @@ fun BadgeManagerDialog(
                                 enabled  = badgeName.isNotBlank(),
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("Enregistrer") }
-                            Spacer(Modifier.height(4.dp))
+
+                            Spacer(Modifier.height(6.dp))
                             OutlinedButton(
                                 onClick  = {
                                     editBadge?.let { b ->
                                         vm.deleteBadge(b.id,
-                                            onSuccess = { editBadge = null; onDismiss() },
-                                            onError   = onError
+                                            onSuccess = {
+                                                editBadge = null
+                                                onDismiss()
+                                            },
+                                            onError = onError
                                         )
                                     }
                                 },
@@ -723,7 +990,10 @@ fun BadgeManagerDialog(
                                     contentColor = MaterialTheme.colorScheme.error
                                 )
                             ) {
-                                Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    Icons.Default.Delete, null,
+                                    modifier = Modifier.size(16.dp)
+                                )
                                 Spacer(Modifier.width(4.dp))
                                 Text("Supprimer ce badge")
                             }
@@ -731,9 +1001,14 @@ fun BadgeManagerDialog(
                     }
                 }
 
-                error?.let {
+                // Message d'erreur
+                error?.let { e ->
                     Spacer(Modifier.height(8.dp))
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        e,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         },
@@ -741,14 +1016,19 @@ fun BadgeManagerDialog(
             when (tab) {
                 1 -> Button(
                     onClick  = {
-                        vm.createOrWearBadge(badgeName, badgeColor,
-                            onSuccess = onDismiss,
-                            onError   = onError
+                        vm.createOrWearBadge(
+                            displayName = badgeName,
+                            colorHex    = badgeColor,
+                            onSuccess   = onDismiss,
+                            onError     = onError
                         )
                     },
                     enabled = badgeName.isNotBlank()
                 ) {
-                    Text(if (allBadges.any { it.name == badgeName.trim().lowercase() }) "Porter ce badge" else "Créer")
+                    val existsAlready = allBadges.any {
+                        it.name == badgeName.trim().lowercase()
+                    }
+                    Text(if (existsAlready) "Porter ce badge" else "Créer")
                 }
                 else -> TextButton(onClick = onDismiss) { Text("Fermer") }
             }
@@ -761,11 +1041,8 @@ fun BadgeManagerDialog(
 
 @Composable
 fun BadgeColorPicker(selected: String, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(
-            BADGE_COLORS.take(6),
-            BADGE_COLORS.drop(6)
-        ).forEach { row ->
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(BADGE_COLORS.take(6), BADGE_COLORS.drop(6)).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { hex ->
                     val c = runCatching {
@@ -776,12 +1053,20 @@ fun BadgeColorPicker(selected: String, onSelect: (String) -> Unit) {
                             .size(30.dp)
                             .clip(CircleShape)
                             .background(c)
-                            .then(if (selected == hex) Modifier.border(2.5.dp, Color.White, CircleShape) else Modifier)
+                            .then(
+                                if (selected == hex)
+                                    Modifier.border(2.5.dp, Color.White, CircleShape)
+                                else Modifier
+                            )
                             .clickable { onSelect(hex) },
                         contentAlignment = Alignment.Center
                     ) {
                         if (selected == hex) {
-                            Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Icon(
+                                Icons.Default.Check, null,
+                                tint     = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
                         }
                     }
                 }

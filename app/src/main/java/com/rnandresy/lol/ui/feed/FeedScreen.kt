@@ -1,5 +1,6 @@
 package com.rnandresy.lol.ui.feed
 
+import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,18 +14,24 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import com.rnandresy.lol.model.Post
 import com.rnandresy.lol.model.Story
 import com.rnandresy.lol.utils.isAdmin
@@ -34,9 +41,9 @@ import java.util.*
 
 val REACTIONS = listOf("❤️", "🔥", "😂", "😱", "👀")
 
-// ── Objet singleton pour mémoriser le scroll entre navigations ────────────────
+// Mémorise la position du scroll entre navigations
 object FeedScrollState {
-    var firstVisibleIndex: Int = 0
+    var firstVisibleIndex:  Int = 0
     var firstVisibleOffset: Int = 0
 }
 
@@ -59,13 +66,11 @@ fun FeedScreen(
     var openStory   by remember { mutableStateOf<Story?>(null) }
     var showFabMenu by remember { mutableStateOf(false) }
 
-    // ── Scroll mémorisé ───────────────────────────────────────────────────────
+    // Scroll mémorisé
     val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex  = FeedScrollState.firstVisibleIndex,
+        initialFirstVisibleItemIndex        = FeedScrollState.firstVisibleIndex,
         initialFirstVisibleItemScrollOffset = FeedScrollState.firstVisibleOffset
     )
-
-    // Sauvegarde la position à chaque scroll
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         FeedScrollState.firstVisibleIndex  = listState.firstVisibleItemIndex
         FeedScrollState.firstVisibleOffset = listState.firstVisibleItemScrollOffset
@@ -173,10 +178,7 @@ fun FeedScreen(
                     }
                 }
             }
-            PullToRefreshContainer(
-                state    = pullState,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
+            PullToRefreshContainer(state = pullState, modifier = Modifier.align(Alignment.TopCenter))
         }
     }
 
@@ -205,17 +207,12 @@ fun StoriesBar(
             ) {
                 Box(
                     modifier         = Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
+                        .size(58.dp).clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
                         .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Add, null,
-                        tint     = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Ma story", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
@@ -231,20 +228,14 @@ fun StoriesBar(
                 modifier            = Modifier.clickable { onOpen(story) }
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(bgColor)
+                    modifier = Modifier.size(58.dp).clip(CircleShape).background(bgColor)
                         .border(
                             2.5.dp,
-                            if (isMe) MaterialTheme.colorScheme.tertiary
-                            else bgColor.copy(alpha = 0.5f),
+                            if (isMe) MaterialTheme.colorScheme.tertiary else bgColor.copy(alpha = 0.5f),
                             CircleShape
                         ),
                     contentAlignment = Alignment.Center
-                ) {
-                    Text(story.emoji.ifBlank { "💭" }, fontSize = 24.sp)
-                }
+                ) { Text(story.emoji.ifBlank { "💭" }, fontSize = 24.sp) }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (isMe) "Toi" else story.username.take(8),
@@ -262,39 +253,17 @@ fun StoryViewDialog(story: Story, onClose: () -> Unit) {
     val bgColor = runCatching {
         Color(android.graphics.Color.parseColor(story.backgroundColor))
     }.getOrElse { Color(0xFF7C4DFF) }
-
-    Dialog(
-        onDismissRequest = onClose,
-        properties       = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier         = Modifier.fillMaxSize().background(bgColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier            = Modifier.padding(32.dp)
-            ) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                 Text(story.emoji.ifBlank { "💭" }, fontSize = 80.sp)
                 Spacer(Modifier.height(24.dp))
-                Text(
-                    story.content,
-                    style      = MaterialTheme.typography.titleLarge,
-                    color      = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    textAlign  = TextAlign.Center
-                )
+                Text(story.content, style = MaterialTheme.typography.titleLarge,
+                    color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    "— ${story.username}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.7f)
-                )
+                Text("— ${story.username}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
             }
-            IconButton(
-                onClick  = onClose,
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-            ) {
+            IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
                 Icon(Icons.Default.Close, null, tint = Color.White)
             }
         }
@@ -330,16 +299,14 @@ fun PostCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 UserAvatar(
                     username = if (post.isAnonymous) "?" else post.username,
+                    photoUrl = if (post.isAnonymous) "" else post.userPhotoUrl,
                     size     = 44,
                     isAdmin  = isAdmin(post.userId) && !post.isAnonymous,
                     onClick  = if (!post.isAnonymous) onAvatarClick else null
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment      = Alignment.CenterVertically,
-                        horizontalArrangement  = Arrangement.spacedBy(5.dp)
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(
                             if (post.isAnonymous) "Quelqu'un 🎭" else post.username,
                             style      = MaterialTheme.typography.titleSmall,
@@ -367,21 +334,42 @@ fun PostCard(
                 }
                 if (isMyPost || userIsAdmin) {
                     IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Default.Delete, null,
+                        Icon(Icons.Default.Delete, null,
                             tint     = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(18.dp)
-                        )
+                            modifier = Modifier.size(18.dp))
                     }
                 }
             }
 
-            // ── Contenu avec mentions colorées ────────────────────────────────
+            // ── Contenu ───────────────────────────────────────────────────────
             Spacer(Modifier.height(10.dp))
-            MentionText(
-                text  = post.content,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            MentionText(text = post.content, style = MaterialTheme.typography.bodyMedium)
+
+            // ── Image ─────────────────────────────────────────────────────────
+            if (post.imageUrl.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                AsyncImage(
+                    model              = post.imageUrl,
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                )
+            }
+
+            // ── Vidéo ─────────────────────────────────────────────────────────
+            if (post.videoUrl.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                VideoPlayer(
+                    videoUrl = post.videoUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(14.dp))
+                )
+            }
 
             // ── Sondage ───────────────────────────────────────────────────────
             if (post.postType == "poll" && post.pollOption1.isNotBlank()) {
@@ -393,10 +381,7 @@ fun PostCard(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             Spacer(Modifier.height(4.dp))
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 REACTIONS.forEach { emoji ->
                     ReactionBtn(
                         emoji    = emoji,
@@ -406,10 +391,7 @@ fun PostCard(
                     )
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(
-                    onClick        = onComment,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                ) {
+                TextButton(onClick = onComment, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
                     Icon(Icons.Default.ChatBubbleOutline, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("${post.commentCount}", style = MaterialTheme.typography.labelMedium)
@@ -418,6 +400,42 @@ fun PostCard(
         }
     }
 }
+
+// ── Lecteur vidéo inline ──────────────────────────────────────────────────────
+
+@Composable
+fun VideoPlayer(videoUrl: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+
+    val exoPlayer = remember(videoUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(videoUrl))
+            prepare()
+            playWhenReady = false
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer.release() }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player         = exoPlayer
+                useController  = true
+                layoutParams   = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            }
+        },
+        modifier = modifier
+    )
+}
+
+// ── Poll section ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun PollSection(post: Post, currentUid: String, onVote: (Int) -> Unit) {
@@ -442,26 +460,19 @@ private fun PollSection(post: Post, currentUid: String, onVote: (Int) -> Unit) {
                 if (hasVoted && pct > 0) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(pct / 100f)
-                            .height(48.dp)
+                            .fillMaxWidth(pct / 100f).height(48.dp)
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
                     )
                 }
                 Row(
-                    modifier              = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier              = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     if (hasVoted) {
-                        Text(
-                            "$pct% ($votes)",
-                            style      = MaterialTheme.typography.labelSmall,
-                            color      = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("$pct% ($votes)", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -474,6 +485,8 @@ private fun PollSection(post: Post, currentUid: String, onVote: (Int) -> Unit) {
         )
     }
 }
+
+// ── Réaction bouton ───────────────────────────────────────────────────────────
 
 @Composable
 fun ReactionBtn(emoji: String, count: Int, isActive: Boolean, onClick: () -> Unit) {
@@ -504,9 +517,14 @@ fun ReactionBtn(emoji: String, count: Int, isActive: Boolean, onClick: () -> Uni
 
 // ── Composants partagés ───────────────────────────────────────────────────────
 
+/**
+ * Avatar universel : affiche la photo si disponible, sinon l'initiale.
+ * [photoUrl] est optionnel — rétrocompatible avec tous les appelants existants.
+ */
 @Composable
 fun UserAvatar(
     username: String,
+    photoUrl: String = "",       // ← paramètre optionnel, défaut ""
     size: Int,
     isAdmin: Boolean = false,
     onClick: (() -> Unit)? = null
@@ -516,27 +534,44 @@ fun UserAvatar(
             .size(size.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(
-                    if (isAdmin) Color(0xFFFFD700).copy(alpha = 0.2f)
-                    else MaterialTheme.colorScheme.primaryContainer
-                )
-                .then(
-                    if (isAdmin) Modifier.border(2.dp, Color(0xFFFFD700), CircleShape)
-                    else Modifier
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text       = username.firstOrNull()?.uppercase() ?: "?",
-                fontSize   = (size / 2.5).sp,
-                fontWeight = FontWeight.Bold,
-                color      = if (isAdmin) Color(0xFFFFD700)
-                else MaterialTheme.colorScheme.onPrimaryContainer
+        if (photoUrl.isNotBlank()) {
+            // Photo réelle
+            AsyncImage(
+                model              = photoUrl,
+                contentDescription = null,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .then(
+                        if (isAdmin) Modifier.border(2.dp, Color(0xFFFFD700), CircleShape)
+                        else Modifier
+                    )
             )
+        } else {
+            // Avatar initiale
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(
+                        if (isAdmin) Color(0xFFFFD700).copy(alpha = 0.2f)
+                        else MaterialTheme.colorScheme.primaryContainer
+                    )
+                    .then(
+                        if (isAdmin) Modifier.border(2.dp, Color(0xFFFFD700), CircleShape)
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text       = username.firstOrNull()?.uppercase() ?: "?",
+                    fontSize   = (size / 2.5).sp,
+                    fontWeight = FontWeight.Bold,
+                    color      = if (isAdmin) Color(0xFFFFD700)
+                    else MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
     }
 }
@@ -549,37 +584,27 @@ fun AdminBadge() {
         modifier = Modifier.border(1.dp, Color(0xFFFFD700), RoundedCornerShape(6.dp))
     ) {
         Text(
-            "👑",
+            "👑 ADMIN",
             modifier   = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-            fontSize   = 9.sp,
-            fontWeight = FontWeight.Bold,
-            color      = Color(0xFFFFD700)
+            fontSize   = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700)
         )
     }
 }
 
 @Composable
 fun PollBadge() {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(6.dp)
-    ) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(6.dp)) {
         Text(
             "📊 Sondage",
             modifier   = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-            fontSize   = 9.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize   = 9.sp, fontWeight = FontWeight.Bold,
             color      = MaterialTheme.colorScheme.onSecondaryContainer
         )
     }
 }
 
 @Composable
-fun BadgeChip(
-    displayName: String,
-    colorHex: String,
-    modifier: Modifier = Modifier
-) {
+fun BadgeChip(displayName: String, colorHex: String, modifier: Modifier = Modifier) {
     val color = runCatching {
         Color(android.graphics.Color.parseColor(colorHex))
     }.getOrElse { Color(0xFF7C4DFF) }
@@ -591,9 +616,7 @@ fun BadgeChip(
         Text(
             displayName,
             modifier   = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            fontSize   = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color      = color
+            fontSize   = 11.sp, fontWeight = FontWeight.Bold, color = color
         )
     }
 }
