@@ -195,7 +195,7 @@ fun NotificationRow(
                             shape  = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                "ADMIN",
+                                "\uD83D\uDC51",
                                 modifier   = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                 fontSize   = 7.sp,
                                 fontWeight = FontWeight.ExtraBold,
@@ -276,7 +276,7 @@ private fun NotifIconBox(type: String, fromAdmin: Boolean) {
 }
 
 private fun notifTitle(notif: AppNotification) = when (notif.type) {
-    "new_post_admin"   -> "📣 Annonce de ${notif.fromUsername}"
+    "new_post_admin"   -> "📣 ${notif.fromUsername}"
     "new_post"         -> "🔥 ${notif.fromUsername} a posté"
     "mention_everyone" -> "📢 ${notif.fromUsername} interpelle tout le monde"
     "mention"          ->

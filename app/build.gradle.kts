@@ -20,11 +20,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled   = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 
@@ -33,17 +37,34 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions { jvmTarget = "17" }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
-    buildFeatures { compose = true }
+    // ── Compose ───────────────────────────────────────────────────────────────
+    buildFeatures {
+        compose = true
+    }
 
 
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/*.kotlin_module"
+            )
+        }
+    }
 }
 
 dependencies {
-    implementation("com.cloudinary:cloudinary-android:2.5.0")
-    implementation(libs.firebase.messaging)
-    implementation(libs.play.services.cast.tv)
+    implementation("com.google.firebase:firebase-messaging-ktx")
+
     // ── Compose BOM ───────────────────────────────────────────────────────────
     val composeBom = platform("androidx.compose:compose-bom:2024.05.00")
     implementation(composeBom)
@@ -53,7 +74,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // ── Android ───────────────────────────────────────────────────────────────
+    // ── AndroidX ─────────────────────────────────────────────────────────────
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
@@ -62,14 +83,14 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // ── Firebase ──────────────────────────────────────────────────────────────
-    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
 
     // ── Image ─────────────────────────────────────────────────────────────────
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // ── Vidéo — Media3 ExoPlayer ──────────────────────────────────────────────
+    // ── Vidéo ─────────────────────────────────────────────────────────────────
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
 

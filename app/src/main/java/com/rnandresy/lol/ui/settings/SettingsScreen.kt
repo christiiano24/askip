@@ -30,6 +30,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.rnandresy.lol.ui.theme.AppTheme
 import com.rnandresy.lol.viewmodel.AskipViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -192,6 +194,28 @@ fun SettingsScreen(
                         checked  = true,
                         enabled  = false
                     ) { /* non modifiable */ }
+                }
+            }
+
+
+            // ── Thème ─────────────────────────────────────────────────────────
+            SettingsSectionTitle("🎨 Apparence")
+            val currentTheme by vm.appTheme.collectAsState()
+            Card(shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(2.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Thème de l'application", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppTheme.values().forEach { theme ->
+                            FilterChip(
+                                selected = currentTheme == theme,
+                                onClick  = { vm.setTheme(theme) },
+                                label    = { Text("${theme.emoji} ${theme.displayName}", style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
                 }
             }
 

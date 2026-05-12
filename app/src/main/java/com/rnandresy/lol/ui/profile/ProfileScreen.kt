@@ -321,8 +321,8 @@ fun ProfileScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(
-                                        if (userIsAdmin) Color(0xFFFFD700).copy(alpha = 0.22f)
-                                        else themeColor.copy(alpha = 0.28f)
+                                        if (userIsAdmin) Color(0xFFFFD700).copy(alpha = 1f)
+                                        else themeColor.copy(alpha = 1f)
                                     )
                                     .then(
                                         if (userIsAdmin)
@@ -335,7 +335,9 @@ fun ProfileScreen(
                                     profile.username.firstOrNull()?.uppercase() ?: "?",
                                     fontSize   = 32.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color      = if (userIsAdmin) Color(0xFFFFD700) else themeColor
+                                    color      = if (userIsAdmin) Color(0xFFFFFFFF) else Color(
+                                        0xFF000000
+                                    )
                                 )
                             }
                         }

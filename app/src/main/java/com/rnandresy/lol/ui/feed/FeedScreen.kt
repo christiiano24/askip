@@ -4,16 +4,63 @@ import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +76,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -37,7 +85,8 @@ import com.rnandresy.lol.model.Story
 import com.rnandresy.lol.utils.isAdmin
 import com.rnandresy.lol.viewmodel.AskipViewModel
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 val REACTIONS = listOf("❤️", "🔥", "😂", "😱", "👀")
 
@@ -163,7 +212,13 @@ fun FeedScreen(
                     contentPadding      = PaddingValues(bottom = 100.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    item { StoriesBar(stories, uid, onNewStory) { openStory = it } }
+                    item { StoriesBar(
+                        stories = stories,
+                        currentUid = uid,
+                        onAddStory = onNewStory,
+                        onDeleteStory = { vm.deleteStory(it) },
+                        onOpen = { openStory = it }   // ← ajouté
+                    )  }
                     items(feed, key = { it.id }) { post ->
                         PostCard(
                             post          = post,
@@ -183,23 +238,32 @@ fun FeedScreen(
     }
 
     openStory?.let { story ->
-        StoryViewDialog(story = story, onClose = { openStory = null })
+        StoryViewDialog(
+            story      = story,
+            currentUid = uid,                                   // ← ajouté
+            onDelete   = { vm.deleteStory(story.id); openStory = null }, // ← ajouté
+            onClose    = { openStory = null }
+        )
     }
 }
 
 // ── Stories Bar ───────────────────────────────────────────────────────────────
+
+// ── Stories Bar — ajoute onDelete ────────────────────────────────────────────
 
 @Composable
 fun StoriesBar(
     stories: List<Story>,
     currentUid: String,
     onAddStory: () -> Unit,
-    onOpen: (Story) -> Unit
+    onOpen: (Story) -> Unit,
+    onDeleteStory: (String) -> Unit      // ← paramètre ajouté
 ) {
     LazyRow(
         contentPadding        = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ── Bouton "Ma story" ──────────────────────────────────────────────────
         item {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -207,35 +271,94 @@ fun StoriesBar(
             ) {
                 Box(
                     modifier         = Modifier
-                        .size(58.dp).clip(CircleShape)
+                        .size(58.dp)
+                        .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
                         .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    Icon(
+                        Icons.Default.Add, null,
+                        tint     = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Ma story", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp)
             }
         }
+
+        // ── Stories existantes ────────────────────────────────────────────────
         items(stories, key = { it.id }) { story ->
             val bgColor = runCatching {
                 Color(android.graphics.Color.parseColor(story.backgroundColor))
             }.getOrElse { Color(0xFF7C4DFF) }
-            val isMe = story.userId == currentUid
+            val isMe    = story.userId == currentUid
+
+            // Menu contextuel pour la propre story de l'utilisateur
+            var showMenu by remember { mutableStateOf(false) }
+
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier            = Modifier.clickable { onOpen(story) }
+                modifier            = Modifier.clickable {
+                    if (isMe) showMenu = true else onOpen(story)
+                }
             ) {
-                Box(
-                    modifier = Modifier.size(58.dp).clip(CircleShape).background(bgColor)
-                        .border(
-                            2.5.dp,
-                            if (isMe) MaterialTheme.colorScheme.tertiary else bgColor.copy(alpha = 0.5f),
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) { Text(story.emoji.ifBlank { "💭" }, fontSize = 24.sp) }
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .clip(CircleShape)
+                            .background(bgColor)
+                            .border(
+                                2.5.dp,
+                                if (isMe) MaterialTheme.colorScheme.tertiary
+                                else bgColor.copy(alpha = 0.5f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(story.emoji.ifBlank { "💭" }, fontSize = 24.sp)
+                    }
+                    // Petit indicateur de suppression sur la propre story
+                    if (isMe) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert, null,
+                                modifier = Modifier.size(10.dp),
+                                tint     = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        DropdownMenu(
+                            expanded         = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text        = { Text("Voir") },
+                                leadingIcon = { Icon(Icons.Default.Visibility, null) },
+                                onClick     = { showMenu = false; onOpen(story) }
+                            )
+                            DropdownMenuItem(
+                                text        = { Text("Supprimer", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete, null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick     = { showMenu = false; onDeleteStory(story.id) }
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (isMe) "Toi" else story.username.take(8),
@@ -248,23 +371,75 @@ fun StoriesBar(
     }
 }
 
+// ── StoryViewDialog — bouton suppression pour le propriétaire ─────────────────
+
 @Composable
-fun StoryViewDialog(story: Story, onClose: () -> Unit) {
+fun StoryViewDialog(
+    story: Story,
+    currentUid: String = "",        // ← ajouté
+    onDelete: () -> Unit = {},      // ← ajouté
+    onClose: () -> Unit
+) {
     val bgColor = runCatching {
         Color(android.graphics.Color.parseColor(story.backgroundColor))
     }.getOrElse { Color(0xFF7C4DFF) }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(modifier = Modifier.fillMaxSize().background(bgColor), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+
+    val isOwner = story.userId == currentUid
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties       = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier         = Modifier.fillMaxSize().background(bgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier            = Modifier.padding(32.dp)
+            ) {
                 Text(story.emoji.ifBlank { "💭" }, fontSize = 80.sp)
                 Spacer(Modifier.height(24.dp))
-                Text(story.content, style = MaterialTheme.typography.titleLarge,
-                    color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text(
+                    story.content,
+                    style      = MaterialTheme.typography.titleLarge,
+                    color      = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    textAlign  = TextAlign.Center
+                )
                 Spacer(Modifier.height(12.dp))
-                Text("— ${story.username}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                Text(
+                    "— ${story.username}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
             }
-            IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+
+            // ── Bouton fermer ─────────────────────────────────────────────────
+            IconButton(
+                onClick  = onClose,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+            ) {
                 Icon(Icons.Default.Close, null, tint = Color.White)
+            }
+
+            // ── Bouton supprimer (propriétaire uniquement) ────────────────────
+            if (isOwner) {
+                IconButton(
+                    onClick  = { onDelete() },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.4f)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete, null,
+                            tint     = Color.White,
+                            modifier = Modifier.padding(6.dp).size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -403,32 +578,30 @@ fun PostCard(
 
 // ── Lecteur vidéo inline ──────────────────────────────────────────────────────
 
+@androidx.annotation.OptIn(UnstableApi::class)
+// ── Lecteur vidéo : playWhenReady = false PARTOUT ────────────────────────────
 @Composable
 fun VideoPlayer(videoUrl: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-
-    val exoPlayer = remember(videoUrl) {
+    val player  = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUrl))
             prepare()
-            playWhenReady = false
+            playWhenReady = false   // ← JAMAIS d'autoplay — économise la data
         }
     }
-
-    DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer.release() }
-    }
+    DisposableEffect(player) { onDispose { player.release() } }
 
     AndroidView(
-        factory = { ctx ->
+        factory  = { ctx ->
             PlayerView(ctx).apply {
-                player         = exoPlayer
-                useController  = true
-                layoutParams   = ViewGroup.LayoutParams(
+                this.player   = player
+                useController = true
+                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                layoutParams  = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             }
         },
         modifier = modifier

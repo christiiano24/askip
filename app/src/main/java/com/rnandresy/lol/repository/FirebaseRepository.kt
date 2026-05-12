@@ -2,6 +2,7 @@ package com.rnandresy.lol.repository
 
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -10,6 +11,8 @@ import com.rnandresy.lol.model.AppNotification
 import com.rnandresy.lol.model.Badge
 import com.rnandresy.lol.model.Comment
 import com.rnandresy.lol.model.Conversation
+import com.rnandresy.lol.model.Group
+import com.rnandresy.lol.model.GroupMessage
 import com.rnandresy.lol.model.Message
 import com.rnandresy.lol.model.Post
 import com.rnandresy.lol.model.Story
@@ -33,10 +36,9 @@ class FirebaseRepository {
         auth.signInWithEmailAndPassword(email, password).await()
     }
 
-    suspend fun register(email: String, password: String): String {
-        return auth.createUserWithEmailAndPassword(email, password).await()
+    suspend fun register(email: String, password: String): String =
+        auth.createUserWithEmailAndPassword(email, password).await()
             .user?.uid ?: error("UID null")
-    }
 
     suspend fun logout() = auth.signOut()
 
@@ -60,28 +62,16 @@ class FirebaseRepository {
 
     suspend fun createDefaultProfile(uid: String, username: String) {
         db.collection("profiles").document(uid).set(mapOf(
-            "userId"           to uid,
-            "username"         to username,
-            "age"              to 0,
-            "bio"              to "",
-            "classeENI"        to "",
-            "relationshipStatus" to "",
-            "themeColor"       to "#7C4DFF",
-            "avatarFrame"      to "none",
-            "moodEmoji"        to "",
-            "moodText"         to "",
-            "badgeIds"         to emptyList<String>(),
-            "postsCount"       to 0,
-            "commentsCount"    to 0,
-            "confessionsCount" to 0,
-            "storiesCount"     to 0,
-            "pollsCount"       to 0,
-            "convsStarted"     to 0,
-            "streak"           to 0,
-            "lastActiveDate"   to "",
-            "hasBadgeENI"      to false,
-            "isAdmin"          to false
-            // ❌ totalReactionsReceived supprimé
+            "userId" to uid, "username" to username, "age" to 0, "bio" to "",
+            "classeENI" to "", "relationshipStatus" to "",
+            "photoUrl" to "", "coverUrl" to "",
+            "themeColor" to "#7C4DFF", "avatarFrame" to "none",
+            "moodEmoji" to "", "moodText" to "",
+            "badgeIds" to emptyList<String>(),
+            "postsCount" to 0, "commentsCount" to 0, "confessionsCount" to 0,
+            "storiesCount" to 0, "pollsCount" to 0, "convsStarted" to 0,
+            "streak" to 0, "lastActiveDate" to "",
+            "hasBadgeENI" to false, "isAdmin" to false
         )).await()
     }
 
@@ -97,13 +87,9 @@ class FirebaseRepository {
     }.getOrNull()
 
     fun listenToAllProfiles(): Flow<List<UserProfile>> = callbackFlow {
-        val l = db.collection("profiles")
-            .addSnapshotListener { s, _ ->
-                trySend(
-                    s?.documents?.mapNotNull { it.toObject(UserProfile::class.java) }
-                        ?: emptyList()
-                )
-            }
+        val l = db.collection("profiles").addSnapshotListener { s, _ ->
+            trySend(s?.documents?.mapNotNull { it.toObject(UserProfile::class.java) } ?: emptyList())
+        }
         awaitClose { l.remove() }
     }
 
@@ -112,16 +98,13 @@ class FirebaseRepository {
     }.getOrElse { emptyList() }
 
     suspend fun findProfileByUsername(username: String): UserProfile? = runCatching {
-        db.collection("profiles")
-            .whereEqualTo("username", username)
-            .get().await()
-            .documents.firstOrNull()?.toObject(UserProfile::class.java)
+        db.collection("profiles").whereEqualTo("username", username)
+            .get().await().documents.firstOrNull()?.toObject(UserProfile::class.java)
     }.getOrNull()
 
     suspend fun updateProfile(uid: String, data: Map<String, Any?>) {
         val clean = data.filterValues { it != null } as Map<String, Any>
-        if (clean.isNotEmpty())
-            db.collection("profiles").document(uid).update(clean).await()
+        if (clean.isNotEmpty()) db.collection("profiles").document(uid).update(clean).await()
     }
 
     suspend fun incrementCounter(uid: String, field: String, by: Long = 1L) {
@@ -142,67 +125,51 @@ class FirebaseRepository {
             .update("streak", newStreak, "lastActiveDate", today).await()
     }
 
-    // ── SYNCHRONISATION DU PSEUDO ─────────────────────────────────────────────
+    // ── SYNC PSEUDO ───────────────────────────────────────────────────────────
 
     suspend fun syncUsername(userId: String, newUsername: String) {
         runCatching {
-            // 1. Posts (non anonymes)
-            val posts = db.collection("posts")
-                .whereEqualTo("userId", userId).get().await()
-            posts.documents.filter {
-                it.getBoolean("isAnonymous") != true
-            }.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "username", newUsername) }
-                batch.commit().await()
-            }
-
-            // 2. Commentaires (collection group)
-            val comments = db.collectionGroup("comments")
-                .whereEqualTo("userId", userId).get().await()
-            comments.documents.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "username", newUsername) }
-                batch.commit().await()
-            }
-
-            // 3. Stories
-            val stories = db.collection("stories")
-                .whereEqualTo("userId", userId).get().await()
-            stories.documents.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "username", newUsername) }
-                batch.commit().await()
-            }
-
-            // 4. Conversations (participantNames map)
-            val convs = db.collection("conversations")
-                .whereArrayContains("participants", userId).get().await()
-            convs.documents.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc ->
-                    batch.update(doc.reference, "participantNames.$userId", newUsername)
+            suspend fun batchUpdate(docs: List<DocumentSnapshot>, field: String) {
+                docs.chunked(400).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { batch.update(it.reference, field, newUsername) }
+                    batch.commit().await()
                 }
-                batch.commit().await()
             }
-
-            // 5. Messages (collection group)
-            val messages = db.collectionGroup("messages")
-                .whereEqualTo("senderId", userId).get().await()
-            messages.documents.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "senderUsername", newUsername) }
-                batch.commit().await()
-            }
-
-            // 6. Notifications envoyées par cet user
-            val notifsSent = db.collection("notifications")
-                .whereEqualTo("fromUserId", userId).get().await()
-            notifsSent.documents.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "fromUsername", newUsername) }
-                batch.commit().await()
-            }
+            batchUpdate(
+                db.collection("posts").whereEqualTo("userId", userId).get().await()
+                    .documents.filter { it.getBoolean("isAnonymous") != true },
+                "username"
+            )
+            batchUpdate(
+                db.collectionGroup("comments").whereEqualTo("userId", userId).get().await().documents,
+                "username"
+            )
+            batchUpdate(
+                db.collection("stories").whereEqualTo("userId", userId).get().await().documents,
+                "username"
+            )
+            db.collection("conversations").whereArrayContains("participants", userId)
+                .get().await().documents.chunked(400).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { batch.update(it.reference, "participantNames.$userId", newUsername) }
+                    batch.commit().await()
+                }
+            batchUpdate(
+                db.collectionGroup("messages").whereEqualTo("senderId", userId).get().await().documents,
+                "senderUsername"
+            )
+            batchUpdate(
+                db.collection("notifications").whereEqualTo("fromUserId", userId).get().await().documents,
+                "fromUsername"
+            )
+            // Sync dans les groupes
+            db.collection("groups").whereArrayContains("members", userId)
+                .get().await().documents.chunked(400).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { batch.update(it.reference, "memberNames.$userId", newUsername) }
+                    batch.commit().await()
+                }
         }
     }
 
@@ -210,16 +177,13 @@ class FirebaseRepository {
 
     suspend fun getAchievements(uid: String): List<Achievement> = runCatching {
         db.collection("profiles").document(uid).collection("achievements")
-            .get().await().documents
-            .mapNotNull { it.toObject(Achievement::class.java) }
+            .get().await().documents.mapNotNull { it.toObject(Achievement::class.java) }
     }.getOrElse { emptyList() }
 
     suspend fun unlockAchievement(uid: String, id: String) {
-        val ref = db.collection("profiles").document(uid)
-            .collection("achievements").document(id)
-        if (!ref.get().await().exists()) {
+        val ref = db.collection("profiles").document(uid).collection("achievements").document(id)
+        if (!ref.get().await().exists())
             ref.set(mapOf("id" to id, "unlockedAt" to System.currentTimeMillis())).await()
-        }
     }
 
     // ── BADGES ────────────────────────────────────────────────────────────────
@@ -232,8 +196,7 @@ class FirebaseRepository {
     }
 
     suspend fun findBadgeByName(name: String): Badge? = runCatching {
-        db.collection("badges")
-            .whereEqualTo("name", name.trim().lowercase())
+        db.collection("badges").whereEqualTo("name", name.trim().lowercase())
             .get().await().documents.firstOrNull()?.toObject(Badge::class.java)
     }.getOrNull()
 
@@ -252,28 +215,22 @@ class FirebaseRepository {
     suspend fun updateBadge(badgeId: String, displayName: String, colorHex: String) {
         db.collection("badges").document(badgeId).update(
             "displayName", displayName.trim(),
-            "name", displayName.trim().lowercase(),
-            "colorHex", colorHex
+            "name", displayName.trim().lowercase(), "colorHex", colorHex
         ).await()
     }
 
     suspend fun deleteBadge(badgeId: String) {
-        val profiles = db.collection("profiles")
-            .whereArrayContains("badgeIds", badgeId).get().await()
-        profiles.documents.forEach {
-            it.reference.update("badgeIds", FieldValue.arrayRemove(badgeId))
-        }
+        db.collection("profiles").whereArrayContains("badgeIds", badgeId).get().await()
+            .documents.forEach { it.reference.update("badgeIds", FieldValue.arrayRemove(badgeId)) }
         db.collection("badges").document(badgeId).delete().await()
     }
 
     suspend fun wearBadge(badgeId: String, userId: String) {
-        db.collection("profiles").document(userId)
-            .update("badgeIds", FieldValue.arrayUnion(badgeId)).await()
+        db.collection("profiles").document(userId).update("badgeIds", FieldValue.arrayUnion(badgeId)).await()
     }
 
     suspend fun unwearBadge(badgeId: String, userId: String) {
-        db.collection("profiles").document(userId)
-            .update("badgeIds", FieldValue.arrayRemove(badgeId)).await()
+        db.collection("profiles").document(userId).update("badgeIds", FieldValue.arrayRemove(badgeId)).await()
     }
 
     // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
@@ -283,29 +240,24 @@ class FirebaseRepository {
             .whereEqualTo("targetUserId", uid)
             .addSnapshotListener { snap, err ->
                 if (err != null) { trySend(emptyList()); return@addSnapshotListener }
-                val list = snap?.documents
-                    ?.mapNotNull { doc ->
-                        doc.toObject(AppNotification::class.java)?.copy(id = doc.id)
-                    }
-                    ?.sortedByDescending { it.timestamp }
-                    ?.take(80)
-                    ?: emptyList()
-                trySend(list)
+                trySend(
+                    snap?.documents
+                        ?.mapNotNull { it.toObject(AppNotification::class.java)?.copy(id = it.id) }
+                        ?.sortedByDescending { it.timestamp }
+                        ?.take(80) ?: emptyList()
+                )
             }
         awaitClose { l.remove() }
     }
 
-    suspend fun createNotification(data: Map<String, Any>) {
-        runCatching {
-            val ref = db.collection("notifications").document()
-            ref.set(data + mapOf("id" to ref.id)).await()
-        }
+    suspend fun createNotification(data: Map<String, Any>) = runCatching {
+        val ref = db.collection("notifications").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
     }
 
     suspend fun createNotificationsForAll(base: Map<String, Any>, excludeUserId: String) {
         runCatching {
-            val ids = getAllUserIds().filter { it != excludeUserId }
-            ids.chunked(400).forEach { chunk ->
+            getAllUserIds().filter { it != excludeUserId }.chunked(400).forEach { chunk ->
                 val batch = db.batch()
                 chunk.forEach { uid ->
                     val ref = db.collection("notifications").document()
@@ -317,41 +269,23 @@ class FirebaseRepository {
     }
 
     suspend fun markNotificationRead(notifId: String) {
-        runCatching {
-            db.collection("notifications")
-                .document(notifId)
-                .update("isRead", true)
-                .await()
-        }
+        db.collection("notifications").document(notifId).update("isRead", true).await()
     }
 
     suspend fun markAllNotificationsRead(uid: String) {
-        runCatching {
-            // 1 seule condition whereEqualTo → pas d'index composite requis
-            val snap = db.collection("notifications")
-                .whereEqualTo("targetUserId", uid)
-                .get()
-                .await()
-
-            // Filtre côté client pour ne prendre que les non lus
-            val unreadDocs = snap.documents.filter {
-                it.getBoolean("isRead") == false
-            }
-            if (unreadDocs.isEmpty()) return@runCatching
-
-            // Batch updates (max 400 par batch)
-            unreadDocs.chunked(400).forEach { chunk ->
-                val batch = db.batch()
-                chunk.forEach { doc -> batch.update(doc.reference, "isRead", true) }
-                batch.commit().await()
-            }
+        val snap = db.collection("notifications").whereEqualTo("targetUserId", uid).get().await()
+        if (snap.isEmpty) return
+        val unread = snap.documents.filter { it.getBoolean("isRead") == false }
+        if (unread.isEmpty()) return
+        unread.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.update(it.reference, "isRead", true) }
+            batch.commit().await()
         }
     }
 
-    suspend fun deleteNotification(notifId: String) {
-        runCatching {
-            db.collection("notifications").document(notifId).delete().await()
-        }
+    suspend fun deleteNotification(notifId: String) = runCatching {
+        db.collection("notifications").document(notifId).delete().await()
     }
 
     // ── POSTS ─────────────────────────────────────────────────────────────────
@@ -381,16 +315,15 @@ class FirebaseRepository {
         db.collection("posts").document(postId).update("isPinned", !pinned).await()
     }
 
-    suspend fun addReaction(
-        postId: String, uid: String, emoji: String,
-        oldEmoji: String?, postOwnerId: String
-    ) {
-        val ref   = db.collection("posts").document(postId)
-        val batch = db.batch()
-        if (oldEmoji != null)
-            batch.update(ref, Post.reactionFieldFor(oldEmoji), FieldValue.arrayRemove(uid))
-        batch.update(ref, Post.reactionFieldFor(emoji), FieldValue.arrayUnion(uid))
-        batch.commit().await()
+    // ── Fix réactions : update atomique en un seul appel ─────────────────────
+    suspend fun addReaction(postId: String, uid: String, emoji: String, oldEmoji: String?) {
+        val updates = hashMapOf<String, Any>(
+            Post.reactionFieldFor(emoji) to FieldValue.arrayUnion(uid)
+        )
+        if (oldEmoji != null && oldEmoji != emoji) {
+            updates[Post.reactionFieldFor(oldEmoji)] = FieldValue.arrayRemove(uid)
+        }
+        db.collection("posts").document(postId).update(updates).await()
     }
 
     suspend fun removeReaction(postId: String, uid: String, emoji: String) {
@@ -401,8 +334,7 @@ class FirebaseRepository {
     suspend fun votePoll(postId: String, uid: String, option: Int) {
         val field = if (option == 1) "pollVotes1" else "pollVotes2"
         db.collection("posts").document(postId).update(
-            "pollVoters", FieldValue.arrayUnion(uid),
-            field, FieldValue.increment(1)
+            "pollVoters", FieldValue.arrayUnion(uid), field, FieldValue.increment(1)
         ).await()
     }
 
@@ -422,15 +354,12 @@ class FirebaseRepository {
     suspend fun addComment(postId: String, data: Map<String, Any>) {
         val ref = db.collection("posts").document(postId).collection("comments").document()
         ref.set(data + mapOf("id" to ref.id)).await()
-        db.collection("posts").document(postId)
-            .update("commentCount", FieldValue.increment(1)).await()
+        db.collection("posts").document(postId).update("commentCount", FieldValue.increment(1)).await()
     }
 
     suspend fun deleteComment(postId: String, commentId: String) {
-        db.collection("posts").document(postId)
-            .collection("comments").document(commentId).delete().await()
-        db.collection("posts").document(postId)
-            .update("commentCount", FieldValue.increment(-1)).await()
+        db.collection("posts").document(postId).collection("comments").document(commentId).delete().await()
+        db.collection("posts").document(postId).update("commentCount", FieldValue.increment(-1)).await()
     }
 
     // ── STORIES ───────────────────────────────────────────────────────────────
@@ -459,8 +388,7 @@ class FirebaseRepository {
     // ── CONVERSATIONS ─────────────────────────────────────────────────────────
 
     fun listenToConversations(uid: String): Flow<List<Conversation>> = callbackFlow {
-        val l = db.collection("conversations")
-            .whereArrayContains("participants", uid)
+        val l = db.collection("conversations").whereArrayContains("participants", uid)
             .addSnapshotListener { s, _ ->
                 trySend(
                     (s?.documents?.mapNotNull {
@@ -472,21 +400,18 @@ class FirebaseRepository {
     }
 
     suspend fun getOrCreateConversation(
-        meId: String, meUsername: String,
-        otherId: String, otherUsername: String
+        meId: String, meUsername: String, otherId: String, otherUsername: String
     ): String {
-        val ids   = listOf(meId, otherId).sorted()
+        val ids    = listOf(meId, otherId).sorted()
         val convId = "${ids[0]}_${ids[1]}"
-        val ref   = db.collection("conversations").document(convId)
+        val ref    = db.collection("conversations").document(convId)
         if (!ref.get().await().exists()) {
             ref.set(mapOf(
-                "id"               to convId,
-                "participants"     to ids,
+                "id" to convId, "participants" to ids,
                 "participantNames" to mapOf(meId to meUsername, otherId to otherUsername),
-                "lastMessage"      to "",
-                "lastSenderId"     to "",
-                "lastTimestamp"    to 0L,
-                "unreadCounts"     to mapOf(meId to 0L, otherId to 0L)
+                "lastMessage" to "", "lastSenderId" to "",
+                "lastTimestamp" to 0L,
+                "unreadCounts" to mapOf(meId to 0L, otherId to 0L)
             )).await()
         }
         return convId
@@ -504,21 +429,104 @@ class FirebaseRepository {
     }
 
     suspend fun sendMessage(convId: String, data: Map<String, Any>, receiverId: String) {
-        val ref = db.collection("conversations").document(convId)
-            .collection("messages").document()
+        val ref = db.collection("conversations").document(convId).collection("messages").document()
         ref.set(data + mapOf("id" to ref.id)).await()
         db.collection("conversations").document(convId).update(
-            "lastMessage",              data["content"] ?: "",
+            "lastMessage", data["content"] ?: (if ((data["mediaType"] as? String) == "audio") "🎤 Vocal"
+            else if ((data["mediaType"] as? String) == "image") "📸 Photo"
+            else if ((data["mediaType"] as? String) == "video") "🎥 Vidéo"
+            else if ((data["mediaType"] as? String) == "file") "📎 ${data["mediaName"]}"
+            else ""),
             "lastSenderId",             data["senderId"] ?: "",
             "lastTimestamp",            data["timestamp"] ?: 0L,
             "unreadCounts.$receiverId", FieldValue.increment(1)
         ).await()
     }
 
-    suspend fun markRead(convId: String, uid: String) {
-        runCatching {
-            db.collection("conversations").document(convId)
-                .update("unreadCounts.$uid", 0L).await()
+    suspend fun markRead(convId: String, uid: String) = runCatching {
+        db.collection("conversations").document(convId).update("unreadCounts.$uid", 0L).await()
+    }
+
+    // ── GROUPES ───────────────────────────────────────────────────────────────
+
+    fun listenToGroups(uid: String): Flow<List<Group>> = callbackFlow {
+        val l = db.collection("groups").whereArrayContains("members", uid)
+            .addSnapshotListener { s, _ ->
+                trySend(
+                    (s?.documents?.mapNotNull {
+                        it.toObject(Group::class.java)?.copy(id = it.id)
+                    } ?: emptyList()).sortedByDescending { it.lastTimestamp }
+                )
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun createGroup(
+        name: String, description: String, emoji: String,
+        creatorId: String, creatorUsername: String, creatorPhoto: String,
+        memberIds: List<String>, memberNames: Map<String, String>,
+        memberPhotos: Map<String, String>
+    ): String {
+        val ref = db.collection("groups").document()
+        val allMembers = (memberIds + creatorId).distinct()
+        val allNames   = memberNames + mapOf(creatorId to creatorUsername)
+        val allPhotos  = memberPhotos + mapOf(creatorId to creatorPhoto)
+        ref.set(mapOf(
+            "id" to ref.id, "name" to name, "description" to description,
+            "emoji" to emoji, "createdBy" to creatorId,
+            "createdByUsername" to creatorUsername,
+            "members" to allMembers, "memberNames" to allNames,
+            "memberPhotos" to allPhotos,
+            "lastMessage" to "", "lastSenderId" to "", "lastSenderUsername" to "",
+            "lastTimestamp" to 0L, "timestamp" to System.currentTimeMillis()
+        )).await()
+        return ref.id
+    }
+
+    suspend fun addGroupMember(groupId: String, uid: String, username: String, photoUrl: String) {
+        db.collection("groups").document(groupId).update(
+            "members", FieldValue.arrayUnion(uid),
+            "memberNames.$uid", username,
+            "memberPhotos.$uid", photoUrl
+        ).await()
+    }
+
+    suspend fun removeGroupMember(groupId: String, uid: String) {
+        db.collection("groups").document(groupId).update(
+            "members", FieldValue.arrayRemove(uid)
+        ).await()
+    }
+
+    suspend fun deleteGroup(groupId: String) {
+        db.collection("groups").document(groupId).delete().await()
+    }
+
+    fun listenToGroupMessages(groupId: String): Flow<List<GroupMessage>> = callbackFlow {
+        val l = db.collection("groups").document(groupId).collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { s, _ ->
+                trySend(s?.documents?.mapNotNull {
+                    it.toObject(GroupMessage::class.java)?.copy(id = it.id)
+                } ?: emptyList())
+            }
+        awaitClose { l.remove() }
+    }
+
+    suspend fun sendGroupMessage(groupId: String, data: Map<String, Any>) {
+        val ref = db.collection("groups").document(groupId).collection("messages").document()
+        ref.set(data + mapOf("id" to ref.id)).await()
+        val preview = when (data["mediaType"] as? String) {
+            "audio" -> "🎤 Message vocal"
+            "image" -> "📸 Photo"
+            "video" -> "🎥 Vidéo"
+            "file"  -> "📎 ${data["mediaName"]}"
+            else    -> (data["content"] as? String)?.take(80) ?: ""
         }
+        db.collection("groups").document(groupId).update(
+            "lastMessage",         preview,
+            "lastSenderId",        data["senderId"] ?: "",
+            "lastSenderUsername",  data["senderUsername"] ?: "",
+            "lastTimestamp",       data["timestamp"] ?: 0L
+        ).await()
     }
 }
