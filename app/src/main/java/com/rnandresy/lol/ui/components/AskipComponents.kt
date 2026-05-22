@@ -146,7 +146,7 @@ fun AdminBadgeLabel(modifier: Modifier = Modifier) {
         border   = BorderStroke(0.5.dp, AdminGold.copy(alpha = 0.6f))
     ) {
         Text(
-            "👑 ADMIN",
+            "👑",
             modifier   = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style      = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
